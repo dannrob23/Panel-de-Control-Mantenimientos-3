@@ -882,31 +882,44 @@ def grafico_dona(realizados: int, pendientes: int):
     return fig
 
 
-def grafico_top_pendientes(datos: pd.DataFrame, top_n: int = 15):
-    """Ranking horizontal de sedes con más pendientes (Realizados vs Pendientes)."""
-    ag = (datos.assign(_sb=datos["_SBAN"] + " " + datos["Oficina"].str[:22])
-          .groupby("_sb").agg(Realizados=("_mt", "sum"), Pendientes=("_pendiente", "sum")))
+def grafico_top_pendientes(datos: pd.DataFrame, top_n: int = 12):
+    """Ranking horizontal de sedes con más pendientes (evita amontonamiento)."""
+    tmp = datos.assign(
+        _lbl=datos["_SBAN"] + " · " + datos["Oficina"].str.slice(0, 30),
+        _full=datos["_SBAN"] + " - " + datos["Oficina"])
+    ag = tmp.groupby(["_lbl", "_full"]).agg(Realizados=("_mt", "sum"),
+                                            Pendientes=("_pendiente", "sum")).reset_index()
     ag["Total"] = ag["Realizados"] + ag["Pendientes"]
     ag = ag[ag["Total"] > 0].sort_values("Pendientes", ascending=False).head(top_n)
-    ag = ag.sort_values("Pendientes", ascending=True)
+    ag = ag.sort_values("Pendientes", ascending=True)          # mayor arriba
+    total_pend = int(ag["Pendientes"].sum())
+
     fig = go.Figure()
-    fig.add_bar(y=ag.index, x=ag["Realizados"], orientation="h", name="✅ Subsanados (MT)",
-                marker_color="#2E9E5B",
-                hovertemplate="<b>%{y}</b><br>Subsanados: %{x:,}<extra></extra>")
-    fig.add_bar(y=ag.index, x=ag["Pendientes"], orientation="h", name="⚠️ Pendientes",
-                marker_color="#D64541",
-                hovertemplate="<b>%{y}</b><br>Pendientes: %{x:,}<extra></extra>")
+    fig.add_bar(
+        y=ag["_lbl"], x=ag["Realizados"], orientation="h", name="✅ Subsanados (MT)",
+        marker=dict(color="#2E9E5B", line=dict(width=0)),
+        customdata=ag["_full"],
+        hovertemplate="<b>%{customdata}</b><br>Subsanados: %{x:,}<extra></extra>")
+    fig.add_bar(
+        y=ag["_lbl"], x=ag["Pendientes"], orientation="h", name="⚠️ Pendientes",
+        marker=dict(color="#D64541", line=dict(width=0)),
+        text=ag["Pendientes"], textposition="outside", textfont=dict(size=10),
+        cliponaxis=False, customdata=ag["_full"],
+        hovertemplate="<b>%{customdata}</b><br>Pendientes: %{x:,}<extra></extra>")
+    alto = max(340, 30 * len(ag) + 120)
     fig.update_layout(
-        title=dict(text=f"<b>Top {top_n} sedes con más pendientes de MT3</b>",
+        title=dict(text=f"<b>Top {len(ag)} sedes con más pendientes de MT3</b>"
+                        f"<br><span style='font-size:11px'>{total_pend:,} pendientes "
+                        f"en este ranking</span>".replace(",", "."),
                    font=dict(size=15), x=0.02),
-        barmode="stack",
-        height=360,
-        margin=dict(l=10, r=15, t=45, b=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(title="Equipos", gridcolor="rgba(128,128,128,.25)"),
-        yaxis=dict(title=""),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        barmode="stack", bargap=0.35,
+        height=alto,
+        margin=dict(l=10, r=40, t=60, b=10),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(title="Equipos", gridcolor="rgba(128,128,128,.25)",
+                   zeroline=False, automargin=True),
+        yaxis=dict(title="", tickfont=dict(size=11), automargin=True),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0),
     )
     return fig
 
@@ -1153,7 +1166,9 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
             sel_est = st.multiselect("🗂️ Estado cronograma", options=presentes, default=presentes,
                                      key="res_estado", placeholder="Todos los estados")
         with f2:
-            min_av = st.slider("🎯 Avance mínimo (%)", 0, 100, 0, step=5,
+            if "res_min_av" not in st.session_state:
+                st.session_state["res_min_av"] = 0
+            min_av = st.slider("🎯 Avance mínimo (%)", 0, 100, step=5,
                                key="res_min_av", help="Muestra oficinas con avance igual o mayor")
         with f3:
             solo_pend = st.checkbox("Solo pendientes\n(< 100%)", key="res_solo_pend")
@@ -1559,14 +1574,20 @@ def main():
                 text=f"Avance MT3 del filtro actual: {avance_filtro:.1f}%".replace(".", ","))
 
     # --- Gráficas ---
+    cfg_chart = {"displaylogo": False,
+                 "modeBarButtonsToRemove": ["lasso2d", "select2d"]}
     col_izq, col_der = st.columns([1, 1.4])
     with col_izq:
         st.plotly_chart(
             grafico_dona(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
-            width="stretch",
+            width="stretch", config=cfg_chart,
         )
     with col_der:
-        st.plotly_chart(grafico_top_pendientes(filtrado, top_n=15), width="stretch")
+        top_n = st.select_slider("Sedes a mostrar en el ranking",
+                                 options=[5, 10, 12, 15, 20, 25], value=12,
+                                 key="top_n_pend")
+        st.plotly_chart(grafico_top_pendientes(filtrado, top_n=top_n),
+                        width="stretch", config=cfg_chart)
 
     # --- Resumen por oficina (Total / Subsanados / Pendientes / % Avance / Novedades) ---
     render_resumen(base_oficina, seleccion, f_attr, nov_resumen)

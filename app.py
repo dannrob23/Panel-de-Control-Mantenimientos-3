@@ -785,22 +785,33 @@ def render_sidebar(df: pd.DataFrame):
                   "COLSOF (No facturable)": "No"}[f_attr_label]
 
         st.divider()
-        if st.button("🔄 Recargar datos del Excel", width="stretch"):
+        if st.button("🔄 Recargar datos", width="stretch"):
             st.cache_data.clear()
             st.rerun()
 
-        rutas2 = rutas_activas()
-        p_data2, p_crono2 = Path(rutas2["data"]), Path(rutas2["crono"])
-        p_campos2 = rutas2["campos"]
-        st.caption(
-            f"**Data en uso:** `{p_data2.name}`\n"
-            f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_data2)):%Y-%m-%d %H:%M}\n"
-            f"**Cronograma:** `{p_crono2.name}`\n"
-            f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_crono2)):%Y-%m-%d %H:%M}\n"
-            + (f"**Campos dashboard:** `{Path(p_campos2).name}`\n"
-               f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_campos2)):%Y-%m-%d %H:%M}"
-               if p_campos2 else "**Campos dashboard:** —")
-        )
+        with st.expander("🗂️ Auditoría y fuentes", expanded=False):
+            rutas2 = rutas_activas()
+            p_data2, p_crono2 = Path(rutas2["data"]), Path(rutas2["crono"])
+            p_campos2, p_ups2 = rutas2["campos"], rutas2.get("crono_ups", "")
+            st.caption(
+                f"**Data en uso:** `{p_data2.name}`\n"
+                f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_data2)):%Y-%m-%d %H:%M}\n"
+                f"**Cronograma Equipos:** `{p_crono2.name}`\n"
+                f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_crono2)):%Y-%m-%d %H:%M}\n"
+                + (f"**Campos dashboard:** `{Path(p_campos2).name}`\n"
+                   f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_campos2)):%Y-%m-%d %H:%M}\n"
+                   if p_campos2 else "**Campos dashboard:** —\n")
+                + (f"**Cronograma UPS:** `{Path(p_ups2).name}`\n"
+                   f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_ups2)):%Y-%m-%d %H:%M}"
+                   if p_ups2 else "**Cronograma UPS:** —")
+            )
+            st.caption(f"🕒 Última actualización: **{leer_ultima_actualizacion()}**")
+            bitacora = DIR_CARGA / "bitacora_cargas.csv"
+            if bitacora.exists():
+                with open(bitacora, "rb") as fh:
+                    st.download_button("⬇️ Bitácora de cargas (CSV)", data=fh.read(),
+                                       file_name="bitacora_cargas.csv", mime="text/csv",
+                                       width="stretch")
         return seleccion, solo_pendientes, f_attr
 
 
@@ -833,21 +844,58 @@ def render_kpis(datos: pd.DataFrame):
 # Gráficas Plotly
 # ----------------------------------------------------------------------------
 def grafico_dona(realizados: int, pendientes: int):
+    total = realizados + pendientes
+    pct = (realizados / total * 100) if total else 0.0
     fig = go.Figure(go.Pie(
-        labels=["✅ Realizados (MT)", "⚠️ Pendientes"],
+        labels=["✅ Subsanados (MT)", "⚠️ Pendientes"],
         values=[realizados, pendientes],
-        hole=0.5,
-        marker=dict(colors=["#2E9E5B", "#D64541"]),
-        textinfo="label+percent",
+        hole=0.68,
+        marker=dict(colors=["#2E9E5B", "#D64541"], line=dict(color="#FFFFFF", width=2)),
+        textinfo="none",
         hovertemplate="<b>%{label}</b><br>%{value:,} equipos (%{percent})<extra></extra>",
     ))
     fig.update_layout(
-        title=dict(text="Avance Mantenimiento Preventivo 3", x=0.02),
-        margin=dict(l=10, r=10, t=50, b=10),
+        title=dict(text="<b>Avance de Mantenimiento Preventivo 3</b>",
+                   font=dict(size=15), x=0.02),
+        annotations=[dict(
+            text=(f"<span style='font-size:28px;font-weight:700'>{pct:.1f}%</span>"
+                  f"<br><span style='font-size:11px;letter-spacing:.5px'>AVANCE GLOBAL</span>"),
+            x=0.5, y=0.5, showarrow=False, align="center")],
+        margin=dict(l=15, r=15, t=45, b=10),
         height=360,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        showlegend=False,
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.08, xanchor="center", x=0.5),
+    )
+    return fig
+
+
+def grafico_top_pendientes(datos: pd.DataFrame, top_n: int = 15):
+    """Ranking horizontal de sedes con más pendientes (Realizados vs Pendientes)."""
+    ag = (datos.assign(_sb=datos["_SBAN"] + " " + datos["Oficina"].str[:22])
+          .groupby("_sb").agg(Realizados=("_mt", "sum"), Pendientes=("_pendiente", "sum")))
+    ag["Total"] = ag["Realizados"] + ag["Pendientes"]
+    ag = ag[ag["Total"] > 0].sort_values("Pendientes", ascending=False).head(top_n)
+    ag = ag.sort_values("Pendientes", ascending=True)
+    fig = go.Figure()
+    fig.add_bar(y=ag.index, x=ag["Realizados"], orientation="h", name="✅ Subsanados (MT)",
+                marker_color="#2E9E5B",
+                hovertemplate="<b>%{y}</b><br>Subsanados: %{x:,}<extra></extra>")
+    fig.add_bar(y=ag.index, x=ag["Pendientes"], orientation="h", name="⚠️ Pendientes",
+                marker_color="#D64541",
+                hovertemplate="<b>%{y}</b><br>Pendientes: %{x:,}<extra></extra>")
+    fig.update_layout(
+        title=dict(text=f"<b>Top {top_n} sedes con más pendientes de MT3</b>",
+                   font=dict(size=15), x=0.02),
+        barmode="stack",
+        height=360,
+        margin=dict(l=10, r=15, t=45, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(title="Equipos", gridcolor="rgba(128,128,128,.25)"),
+        yaxis=dict(title=""),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )
     return fig
 
@@ -1403,8 +1451,13 @@ def main():
     st.title("🛠️ Control Mantenimiento Preventivo 3")
     scope = "Todas las oficinas" if not seleccion else f"{len(seleccion)} oficina(s)"
     atrib = {"T": "Todos", "Si": "BANCO (Facturable Si)", "No": "COLSOF (No facturable)"}[f_attr]
+    st.markdown(
+        f":blue-badge[**Módulo: {modulo}**] "
+        f":green-badge[🟢 Operativo] "
+        f":gray-badge[🕒 Última actualización: {leer_ultima_actualizacion()}]"
+    )
     st.caption(
-        f"Módulo: **{modulo}** · Vista: **{scope}** · Atribución: **{atrib}** · "
+        f"Vista: **{scope}** · Atribución: **{atrib}** · "
         f"{len(filtrado):,} equipos".replace(",", ".")
     )
     st.caption(
@@ -1416,8 +1469,6 @@ def main():
                and 'Novedades del día' in nov_resumen.columns and pd.notna(fecha_corte))
            else " · Novedades: sin datos")
     )
-
-    st.caption(f"🕒 Última actualización: **{leer_ultima_actualizacion()}**")
     banner_publico()
 
     # --- Validación de integridad de los archivos en uso ---
@@ -1441,6 +1492,9 @@ def main():
                 st.warning(msg)
 
     render_kpis(filtrado)
+    avance_filtro = float(filtrado["_mt"].mean() * 100) if len(filtrado) else 0.0
+    st.progress(min(max(avance_filtro / 100.0, 0.0), 1.0),
+                text=f"Avance MT3 del filtro actual: {avance_filtro:.1f}%".replace(".", ","))
 
     # --- Gráficas ---
     col_izq, col_der = st.columns([1, 1.4])
@@ -1450,7 +1504,8 @@ def main():
             width="stretch",
         )
     with col_der:
-        st.plotly_chart(grafico_barras(filtrado), width="stretch")
+        st.plotly_chart(grafico_top_pendientes(filtrado, top_n=15), width="stretch")
+    st.plotly_chart(grafico_barras(filtrado), width="stretch")
 
     # --- Resumen por oficina (Total / Subsanados / Pendientes / % Avance / Novedades) ---
     render_resumen(base_oficina, seleccion, f_attr, nov_resumen)

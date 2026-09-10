@@ -1185,6 +1185,19 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
                 vis = vis[pd.to_numeric(vis["Novedades del día"], errors="coerce").fillna(0) > 0]
             vis = vis.reset_index(drop=True)
 
+        info_f, btn_f = st.columns([3, 1])
+        with info_f:
+            st.caption("ℹ️ Los filtros de **este resumen** son independientes de los KPIs "
+                       "superiores (que usan el módulo y los filtros del sidebar).")
+        with btn_f:
+            if st.button("♻️ Restablecer filtros del resumen", key=f"reset_res_{tipo}"):
+                for k in ("res_estado", "res_catnov"):
+                    st.session_state.pop(k, None)
+                st.session_state["res_min_av"] = 0
+                st.session_state["res_solo_pend"] = False
+                st.session_state["res_solo_nov"] = False
+                st.rerun()
+
         if vis.empty:
             st.info("Sin oficinas que cumplan los filtros del resumen.")
             return
@@ -1431,6 +1444,12 @@ def main():
         st.session_state["f_atrib"] = "Todos"
         st.session_state["f_oficinas"] = []
         st.session_state["f_solo_pend"] = False
+        # Filtros internos del cuadro "Resumen por oficina"
+        for k in ("res_estado", "res_catnov"):
+            st.session_state.pop(k, None)
+        st.session_state["res_min_av"] = 0
+        st.session_state["res_solo_pend"] = False
+        st.session_state["res_solo_nov"] = False
 
     seleccion, solo_pendientes, f_attr = render_sidebar(df, cod_mod)
 

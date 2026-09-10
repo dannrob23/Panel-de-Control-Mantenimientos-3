@@ -775,16 +775,20 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
         if not opciones:
             st.warning("Este módulo no tiene oficinas con datos.")
 
+        if "f_solo_pend" not in st.session_state:
+            st.session_state["f_solo_pend"] = False
         solo_pendientes = st.checkbox(
             "Mostrar solo pendientes ⚠️",
-            value=False,
+            key="f_solo_pend",
             help="Filtra la tabla y métricas a los equipos que aún no tienen consecutivo MT3.",
         )
 
+        if "f_atrib" not in st.session_state:
+            st.session_state["f_atrib"] = "Todos"
         f_attr_label = st.radio(
             "Distinguir por facturación (AN)",
             options=["Todos", "BANCO (Facturable Si)", "COLSOF (No facturable)"],
-            index=0,
+            key="f_atrib",
             help="Según columna Facturable: Si = atribuible a BANCO · No = gestión COLSOF.",
         )
         f_attr = {"Todos": "T",
@@ -1420,6 +1424,14 @@ def main():
     cod_mod = {"Componente 1": "C1", "Componente 2 (Impresoras láser)": "C2",
                "UPS": "UPS"}[modulo]
 
+    # Al cambiar de módulo se reinician los filtros que podrían dejarlo vacío
+    # (p. ej. atribución BANCO (Si) en Componente 2, que es 100% No facturable).
+    if st.session_state.get("_modulo_prev") != modulo:
+        st.session_state["_modulo_prev"] = modulo
+        st.session_state["f_atrib"] = "Todos"
+        st.session_state["f_oficinas"] = []
+        st.session_state["f_solo_pend"] = False
+
     seleccion, solo_pendientes, f_attr = render_sidebar(df, cod_mod)
 
     # UPS: estado de sede derivado del cronograma UPS (fecha + avance en MT)
@@ -1466,8 +1478,16 @@ def main():
                 st.rerun()
         elif solo_pendientes and not base_mod.empty and bool(base_mod["_mt"].all()):
             st.success(f"🎉 Todos los elementos de **{modulo}** ya tienen MT3.")
+        elif f_attr != "T" and not base_mod.empty:
+            nombre_atr = "BANCO (Facturable Si)" if f_attr == "Si" else "COLSOF (No facturable)"
+            st.warning(f"El módulo **{modulo}** no tiene elementos **{nombre_atr}**. "
+                       "Cambia la atribución a **Todos** para verlo.")
+            if st.button("🧹 Ver todos (atribución Todos)", key="limpiar_atrib"):
+                st.session_state["f_atrib"] = "Todos"
+                st.rerun()
         else:
-            st.warning(f"Sin datos para **{modulo}** con los filtros seleccionados.")
+            st.warning(f"Sin datos para **{modulo}** con los filtros seleccionados. "
+                       "Revisa el filtro de Oficina o la atribución.")
         st.stop()
 
     # --- Título / KPIs ---

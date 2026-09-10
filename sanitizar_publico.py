@@ -102,7 +102,33 @@ def main():
         c[[k for k in keep if k in c.columns]].to_excel(DATA / "Cronograma_actual.xlsx",
                                                         index=False, sheet_name="Hoja1")
         print("Cronograma anonimizado:", len(c))
+    _escribir_metadata()
     print("Listo. Revisar data/ y hacer commit/push.")
+
+
+def _escribir_metadata():
+    import json
+    info = {}
+    for nombre in ("Data_actual.xlsx", "Campos_actual.xlsx", "Cronograma_actual.xlsx"):
+        p = DATA / nombre
+        if p.exists():
+            info[nombre] = {"sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+                            "bytes": p.stat().st_size}
+    meta = {"fecha_hora": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "anonimizado": True, "archivos": info}
+    try:
+        meta["filas_data"] = int(len(pd.read_excel(DATA / "Data_actual.xlsx",
+                                                   sheet_name="Hoja1")))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        meta["filas_novedades"] = int(len(pd.read_excel(DATA / "Campos_actual.xlsx",
+                                                        sheet_name="Novedades Equipos").dropna(how="all")))
+    except Exception:  # noqa: BLE001
+        pass
+    (DATA / "ultima_actualizacion.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    print("Última actualización:", meta["fecha_hora"])
 
 
 if __name__ == "__main__":

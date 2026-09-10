@@ -1,0 +1,20 @@
+{
+  "fecha_hora": "2026-09-10 09:55:50",
+  "anonimizado": true,
+  "archivos": {
+    "Data_actual.xlsx": {
+      "sha256": "f19b026bc9deda3f66479141b1a4bc2a5d2c72bf66b8e482f70f94301053e858",
+      "bytes": 1751652
+    },
+    "Campos_actual.xlsx": {
+      "sha256": "eff0e2b0b50e985ab2b922a1132eda94dfc0b714cb77c1552fefa156b1ff1ce8",
+      "bytes": 45594
+    },
+    "Cronograma_actual.xlsx": {
+      "sha256": "8e40b55a86ee319d294bce5d221d0aee0d18fc7d9aa6dc44cfbd41b634de5409",
+      "bytes": 62064
+    }
+  },
+  "filas_data": 31791,
+  "filas_novedades": 22
+}

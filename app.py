@@ -882,6 +882,105 @@ def grafico_dona(realizados: int, pendientes: int):
     return fig
 
 
+def grafico_gauge(realizados: int, pendientes: int):
+    """Gauge ejecutivo con el % de avance global."""
+    total = realizados + pendientes
+    pct = (realizados / total * 100) if total else 0.0
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=round(pct, 1),
+        number=dict(suffix="%", font=dict(size=30)),
+        title=dict(text=f"Avance MT3 global<br><span style='font-size:11px'>"
+                        f"{realizados:,} de {total:,} equipos</span>".replace(",", "."),
+                   font=dict(size=14)),
+        gauge=dict(
+            axis=dict(range=[0, 100]),
+            bar=dict(color="#2E9E5B"),
+            steps=[dict(range=[0, 50], color="#FBE6E5"),
+                   dict(range=[50, 80], color="#FDF0DC"),
+                   dict(range=[80, 100], color="#E3F2E8")],
+            threshold=dict(line=dict(color="#1F4E78", width=3), thickness=0.75, value=pct),
+        ),
+    ))
+    fig.update_layout(height=340, margin=dict(l=25, r=25, t=70, b=10),
+                      paper_bgcolor="rgba(0,0,0,0)")
+    return fig
+
+
+def grafico_tendencia(datos: pd.DataFrame):
+    """Tendencia diaria y acumulada de MT3 (usa Fecha de mantenimiento 3)."""
+    if "Fecha de mantenimiento 3" not in datos.columns:
+        return None
+    d = datos[datos["_mt"]].copy()
+    d["_f"] = pd.to_datetime(d["Fecha de mantenimiento 3"], errors="coerce")
+    d = d[d["_f"].notna()]
+    if d.empty:
+        return None
+    serie = d.groupby(d["_f"].dt.date).size().sort_index()
+    acum = serie.cumsum()
+    x = [f"{f:%d/%m}" for f in serie.index]
+    fig = go.Figure()
+    fig.add_scatter(x=x, y=serie.values, name="Por día", mode="lines+markers",
+                    line=dict(color="#2E75B6", width=2), marker=dict(size=6),
+                    hovertemplate="%{x}<br>MT3 del día: %{y}<extra></extra>")
+    fig.add_scatter(x=x, y=acum.values, name="Acumulado", mode="lines",
+                    line=dict(color="#70AD47", width=2, dash="dot"), yaxis="y2",
+                    hovertemplate="%{x}<br>Acumulado: %{y}<extra></extra>")
+    fig.update_layout(
+        title=dict(text="<b>Tendencia MT3 (realizados por día)</b>", font=dict(size=15), x=0.02),
+        height=340, margin=dict(l=10, r=10, t=55, b=10),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(title="", gridcolor="rgba(128,128,128,.2)"),
+        yaxis=dict(title="Por día", rangemode="tozero"),
+        yaxis2=dict(title="Acumulado", overlaying="y", side="right", showgrid=False),
+        legend=dict(orientation="h", y=1.02, x=0),
+    )
+    return fig
+
+
+def grafico_heatmap(datos: pd.DataFrame):
+    """Heatmap Regional × Estado con pendientes, total y avance."""
+    if "Regional" not in datos.columns or "_est_crono" not in datos.columns:
+        return None
+    d = datos.copy()
+    d["_est"] = d["_est_crono"].astype(str).str.replace(r"^[^A-Za-zÁÉÍÓÚáéíóúñ]+", "",
+                                                        regex=True).str.strip()
+    orden = ["Programada", "En proceso", "Finalizada", "Reprogramada", "Sin cronograma"]
+    cols = [c for c in orden if c in set(d["_est"])]
+    if not cols:
+        return None
+    pend = d.pivot_table(index="Regional", columns="_est", values="_pendiente",
+                         aggfunc="sum", fill_value=0)
+    total = d.pivot_table(index="Regional", columns="_est", values="_pendiente",
+                          aggfunc="size", fill_value=0)
+    mt = d.assign(_m=d["_mt"].astype(int)).pivot_table(index="Regional", columns="_est",
+                                                      values="_m", aggfunc="sum", fill_value=0)
+    pend = pend.reindex(columns=cols, fill_value=0)
+    total = total.reindex(columns=cols, fill_value=0)
+    mt = mt.reindex(columns=cols, fill_value=0)
+    avance = (mt / total * 100).where(total > 0, 0).round(0)
+
+    custom = [[[int(total.iloc[i, j]), f"{avance.iloc[i, j]:.0f}%"]
+               for j in range(len(cols))] for i in range(len(pend.index))]
+    fig = go.Figure(go.Heatmap(
+        z=pend.values, x=cols, y=list(pend.index),
+        text=[[f"{int(v)}" for v in fila] for fila in pend.values],
+        texttemplate="%{text}", textfont=dict(size=11),
+        customdata=custom, colorscale="Reds", colorbar=dict(title="Pendientes"),
+        hovertemplate="<b>%{y}</b> · %{x}<br>Pendientes: %{z}<br>"
+                      "Total: %{customdata[0]}<br>Avance MT3: %{customdata[1]}<extra></extra>",
+    ))
+    fig.update_layout(
+        title=dict(text="<b>Mapa de calor: pendientes por Regional y Estado</b>",
+                   font=dict(size=15), x=0.02),
+        height=max(320, 42 * len(pend.index) + 120),
+        margin=dict(l=10, r=10, t=55, b=10),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(title=""), yaxis=dict(title="", autorange="reversed"),
+    )
+    return fig
+
+
 def grafico_top_pendientes(datos: pd.DataFrame, top_n: int = 12):
     """Ranking horizontal de sedes con más pendientes (evita amontonamiento)."""
     tmp = datos.assign(
@@ -1465,6 +1564,7 @@ def main():
         st.session_state["res_min_av"] = 0
         st.session_state["res_solo_pend"] = False
         st.session_state["res_solo_nov"] = False
+        st.session_state.pop("click_sban", None)
 
     seleccion, solo_pendientes, f_attr = render_sidebar(df, cod_mod)
 
@@ -1497,6 +1597,9 @@ def main():
     base_oficina = df_mod[mascara_office]
     if f_attr != "T":
         base_oficina = base_oficina[base_oficina["Facturable"] == f_attr]
+    click_sban = st.session_state.get("click_sban")
+    if click_sban:
+        base_oficina = base_oficina[base_oficina["_SBAN"].eq(click_sban)]
 
     filtrado = base_oficina
     if solo_pendientes:
@@ -1576,18 +1679,56 @@ def main():
     # --- Gráficas ---
     cfg_chart = {"displaylogo": False,
                  "modeBarButtonsToRemove": ["lasso2d", "select2d"]}
-    col_izq, col_der = st.columns([1, 1.4])
-    with col_izq:
+    cfg_sel = {"displaylogo": False,
+               "modeBarButtonsToRemove": ["lasso2d", "select2d", "zoom2d", "pan2d"]}
+
+    click = st.session_state.get("click_sban")
+    if click:
+        cc1, cc2 = st.columns([4, 1])
+        cc1.info(f"🎯 Filtro activo por clic en el ranking: **SBAN {click}**")
+        if cc2.button("✖ Quitar filtro", key="quitar_click"):
+            st.session_state.pop("click_sban", None)
+            st.rerun()
+
+    fila1a, fila1b = st.columns([1, 1])
+    with fila1a:
         st.plotly_chart(
             grafico_dona(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
-            width="stretch", config=cfg_chart,
-        )
-    with col_der:
+            width="stretch", config=cfg_chart)
+    with fila1b:
+        st.plotly_chart(
+            grafico_gauge(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
+            width="stretch", config=cfg_chart)
+
+    fila2a, fila2b = st.columns([1.4, 1])
+    with fila2a:
         top_n = st.select_slider("Sedes a mostrar en el ranking",
                                  options=[5, 10, 12, 15, 20, 25], value=12,
                                  key="top_n_pend")
-        st.plotly_chart(grafico_top_pendientes(filtrado, top_n=top_n),
-                        width="stretch", config=cfg_chart)
+        sel = st.plotly_chart(
+            grafico_top_pendientes(filtrado, top_n=top_n), width="stretch",
+            config=cfg_sel, key="chart_top", on_select="rerun", selection_mode="points")
+        try:
+            pts = sel.selection.points if (sel is not None and getattr(sel, "selection", None)) else []
+        except Exception:  # noqa: BLE001
+            pts = []
+        if pts:
+            etiqueta = str(pts[0].get("y") or pts[0].get("x") or "")
+            candidato = etiqueta[:5]
+            if candidato.isdigit() and st.session_state.get("click_sban") != candidato:
+                st.session_state["click_sban"] = candidato
+                st.rerun()
+        st.caption("💡 Haz clic en una barra para filtrar el panel por esa sede.")
+    with fila2b:
+        fig_t = grafico_tendencia(filtrado)
+        if fig_t is not None:
+            st.plotly_chart(fig_t, width="stretch", config=cfg_chart)
+        else:
+            st.info("Sin fechas de MT3 para la selección actual.")
+
+    fig_h = grafico_heatmap(filtrado)
+    if fig_h is not None:
+        st.plotly_chart(fig_h, width="stretch", config=cfg_chart)
 
     # --- Resumen por oficina (Total / Subsanados / Pendientes / % Avance / Novedades) ---
     render_resumen(base_oficina, seleccion, f_attr, nov_resumen)

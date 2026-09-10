@@ -50,6 +50,8 @@ def _tipo_archivo(path) -> str:
         return ""
     if "Dashboard_KPI" in xl.sheet_names:
         return "campos"
+    if "UPS" in xl.sheet_names or "UPS" in Path(path).name.upper():
+        return "crono_ups"
     try:
         cols = set(map(str, xl.parse(xl.sheet_names[0], nrows=0).columns))
     except Exception:  # noqa: BLE001
@@ -70,6 +72,8 @@ def _tipo_archivo_bytes(data: bytes) -> str:
         return ""
     if "Dashboard_KPI" in xl.sheet_names:
         return "campos"
+    if "UPS" in xl.sheet_names:
+        return "crono_ups"
     try:
         cols = set(map(str, xl.parse(xl.sheet_names[0], nrows=0).columns))
     except Exception:  # noqa: BLE001
@@ -106,6 +110,7 @@ def _descubrir_ingesta(clave: str, mtime: float, carpetas: tuple) -> dict:
                 out[t] = str(p)
     out.setdefault("data", str(RUTA_XLSX) if RUTA_XLSX.exists() else "")
     out.setdefault("crono", str(RUTA_CRONO) if RUTA_CRONO.exists() else "")
+    out.setdefault("crono_ups", "")
     out.setdefault("campos", "")
     return out
 
@@ -116,6 +121,7 @@ def rutas_activas() -> dict:
     mtime = sum(_mtime_carpeta(Path(c)) for c in carpetas)
     rutas = _descubrir_ingesta(clave, mtime, carpetas)
     for clave_sesion, sesion in (("data", "ruta_data"), ("crono", "ruta_crono"),
+                                 ("crono_ups", "ruta_crono_ups"),
                                  ("campos", "ruta_campos")):
         if st.session_state.get(sesion):
             rutas[clave_sesion] = st.session_state[sesion]
@@ -166,6 +172,11 @@ def ruta_crono_act() -> Path:
     return Path(rutas_activas()["crono"])
 
 
+def ruta_crono_ups_act():
+    ruta = rutas_activas().get("crono_ups", "")
+    return Path(ruta) if ruta else None
+
+
 def ruta_campos_act():
     ruta = rutas_activas()["campos"]
     return Path(ruta) if ruta else None
@@ -203,9 +214,10 @@ def _guardar_subida(uploaded, tipo: str, sufijo: str) -> Path:
 
 SUFIJOS = {"data": ("Data_PCTriage", "ruta_data"),
            "campos": ("Campos_dashboard", "ruta_campos"),
-           "crono": ("Cronograma_Equipos", "ruta_crono")}
+           "crono": ("Cronograma_Equipos", "ruta_crono"),
+           "crono_ups": ("Cronograma_UPS", "ruta_crono_ups")}
 ETIQUETAS = {"data": "Data de ejecución", "campos": "Campos dashboard",
-             "crono": "Cronograma"}
+             "crono": "Cronograma Equipos", "crono_ups": "Cronograma UPS"}
 
 
 def aplicar_subida(uploaded):
@@ -318,6 +330,86 @@ def cargar_estados_crono() -> dict:
 
 
 # ----------------------------------------------------------------------------
+# Cronograma UPS (hoja 'UPS'): fecha planificada y UPS programadas por sede
+# ----------------------------------------------------------------------------
+@st.cache_data(show_spinner="Leyendo cronograma UPS…")
+def _cargar_ups(path: str, mtime: float) -> pd.DataFrame:
+    xl = pd.ExcelFile(path)
+    hoja = "UPS" if "UPS" in xl.sheet_names else xl.sheet_names[0]
+    return xl.parse(hoja)
+
+
+def cargar_crono_ups():
+    p = ruta_crono_ups_act()
+    if p is None or not p.exists():
+        return None
+    return _cargar_ups(str(p), os.path.getmtime(p))
+
+
+def preparar_crono_ups(u):
+    """Consolida el cronograma UPS por SBAN (fecha mínima y UPS programadas)."""
+    vacio = pd.DataFrame(columns=["_SBAN", "Oficina", "Regional", "Fecha plan", "UPS plan"])
+    if u is None or getattr(u, "empty", True):
+        return vacio
+    c_sban = _col(u, "SBAN")
+    c_fecha = _col(u, "FECHA", "Fecha")
+    c_ups = _col(u, "UPS")
+    c_nom = _col(u, "Nombre Oficina")
+    c_reg = _col(u, "Jefaturas  Operaciones Regional",
+                 "Jefaturas\u00a0 Operaciones Regional", "Gerencia Regional", "Gerencia Zonal")
+    if c_sban is None:
+        return vacio
+    tmp = pd.DataFrame({
+        "_SBAN": u[c_sban].apply(_pad5),
+        "Oficina": u[c_nom].astype(str) if c_nom else "",
+        "Regional": u[c_reg].astype(str) if c_reg else "",
+        "Fecha plan": pd.to_datetime(u[c_fecha], errors="coerce") if c_fecha else pd.NaT,
+        "UPS plan": pd.to_numeric(u[c_ups], errors="coerce").fillna(0) if c_ups else 0,
+    })
+    tmp = tmp[tmp["_SBAN"].astype(str).str.len() > 0]
+    g = tmp.groupby("_SBAN", as_index=False).agg(
+        Oficina=("Oficina", lambda s: s.mode().iloc[0] if len(s) else ""),
+        Regional=("Regional", lambda s: s.mode().iloc[0] if len(s) else ""),
+        **{"Fecha plan": ("Fecha plan", "min"), "UPS plan": ("UPS plan", "sum")})
+    return g
+
+
+def _comp_por_texto(txt) -> str:
+    t = str(txt).lower()
+    if "ups" in t:
+        return "UPS"
+    if any(k in t for k in ("impresora", "laser", "láser", "mfp", "multifuncional")):
+        return "C2"
+    return "C1"
+
+
+def estados_ups(df: pd.DataFrame, cup: pd.DataFrame) -> dict:
+    """Estado de la sede UPS derivado de la FECHA del cronograma UPS y el avance en MT."""
+    if cup is None or cup.empty:
+        return {}
+    ups = df[df["_componente"].eq("UPS")].copy()
+    if "_SBAN" not in ups.columns:
+        ups["_SBAN"] = ups["SBAN"].apply(_pad5)
+    agg = ups.groupby("_SBAN").agg(Total=("Serial", "size"), MT=("_mt", "sum"))
+    hoy = pd.Timestamp.now().normalize()
+    out = {}
+    for _, r in cup.iterrows():
+        s = r["_SBAN"]
+        fecha = r["Fecha plan"]
+        tot = int(agg.loc[s, "Total"]) if s in agg.index else 0
+        mt = int(agg.loc[s, "MT"]) if s in agg.index else 0
+        if pd.notna(fecha) and hoy < fecha:
+            out[s] = "Programada"
+        elif tot > 0 and mt >= tot:
+            out[s] = "Finalizada"
+        elif pd.notna(fecha) and fecha <= hoy:
+            out[s] = "En proceso"
+        else:
+            out[s] = "Programada"
+    return out
+
+
+# ----------------------------------------------------------------------------
 # Campos dashboard: estado de la sede, Categoría Novedad (Y) y contador diario
 # ----------------------------------------------------------------------------
 @st.cache_data(show_spinner="Leyendo Campos dashboard…")
@@ -356,8 +448,13 @@ def _col(df, *nombres):
     return None
 
 
-def preparar_campos(kpi, nov):
-    """Normaliza Dashboard_KPI y Novedades Equipos por SBAN (5 dígitos)."""
+def preparar_campos(kpi, nov, df=None):
+    """Normaliza Dashboard_KPI y Novedades Equipos por SBAN (5 dígitos).
+
+    Asigna `_comp` (C1/C2/UPS) para que las novedades no se trasladen entre módulos:
+    - Con Serial: componente del elemento según la Data.
+    - Sin Serial: C1 por defecto, salvo que el texto mencione UPS o impresora/láser.
+    """
     k = pd.DataFrame(columns=["_SBAN", "Categoría Novedad", "Estado sede", "Obs. novedad"])
     if kpi is not None and not kpi.empty:
         cat = _col(kpi, "Categoria Novedad", "Categoría Novedad")
@@ -398,6 +495,33 @@ def preparar_campos(kpi, nov):
             col = _col(n, origen)
             if col:
                 n[destino] = n[col].astype(str).fillna("")
+        # Componente por Serial (o por texto si no hay serial)
+        mapa = {}
+        if df is not None and not df.empty and "Serial" in df.columns \
+                and "_componente" in df.columns:
+            mapa = dict(zip(df["Serial"].astype(str).str.strip(),
+                            df["_componente"].astype(str)))
+
+        texto_n = (n["Obs. novedad detalle"].astype(str) if "Obs. novedad detalle" in n.columns
+                   else pd.Series([""] * len(n), index=n.index))
+
+        def _comp_novedad(serial, texto):
+            comp = mapa.get(str(serial).strip())
+            return comp if comp in ("C1", "C2", "UPS") else _comp_por_texto(texto)
+
+        if len(n):
+            n["_comp"] = [_comp_novedad(s, t) for s, t in zip(n["_Serial"], texto_n)]
+        else:
+            n["_comp"] = []
+
+    if "_comp" not in n.columns:
+        n["_comp"] = pd.Series(dtype=str)
+    if len(k):
+        texto_k = (k["Obs. novedad"].astype(str) if "Obs. novedad" in k.columns
+                   else pd.Series([""] * len(k), index=k.index))
+        k["_comp"] = [_comp_por_texto(t) for t in texto_k]
+    else:
+        k["_comp"] = []
     return k, n
 
 
@@ -460,7 +584,7 @@ def _cronograma_validacion(path: str, mtime: float) -> pd.DataFrame:
     return pd.read_excel(path, sheet_name="Hoja1")
 
 
-def validar_integridad(d: pd.DataFrame, c: pd.DataFrame, kpi=None, nov=None):
+def validar_integridad(d: pd.DataFrame, c: pd.DataFrame, kpi=None, nov=None, cup=None):
     """Devuelve (criticos, avisos). Criticos detienen la app; avisos se muestran."""
     criticos, avisos = [], []
 
@@ -558,6 +682,37 @@ def validar_integridad(d: pd.DataFrame, c: pd.DataFrame, kpi=None, nov=None):
             if fuera:
                 avisos.append(f"⚠️ Novedades Equipos: {len(fuera)} SBAN sin registro en la Data "
                               f"(ej. {fuera[:5]}).")
+
+    # --- Cronograma UPS ---
+    if cup is None or getattr(cup, "empty", True):
+        avisos.append("⚠️ Cronograma UPS no disponible: la pestaña UPS quedará sin fecha/estado.")
+    else:
+        c_sban = _col(cup, "SBAN")
+        c_fecha = _col(cup, "FECHA", "Fecha")
+        c_ups = _col(cup, "UPS")
+        faltan_u = set()
+        if c_sban is None:
+            faltan_u.add("SBAN")
+        if c_fecha is None:
+            faltan_u.add("FECHA")
+        if c_ups is None:
+            faltan_u.add("UPS")
+        if faltan_u:
+            avisos.append("⚠️ Cronograma UPS: faltan columnas " + ", ".join(sorted(faltan_u)) + ".")
+        else:
+            sb = {_pad5(v) for v in cup[c_sban].dropna()}
+            sb.discard("")
+            d_ups = d[d["Categoría"].astype(str).str.upper().eq("UPS")]
+            en_data = {_pad5(v) for v in d_ups["SBAN"].dropna()}
+            fuera = sorted(sb - en_data)
+            if fuera:
+                avisos.append(f"⚠️ Cronograma UPS: {len(fuera)} SBAN sin UPS en la Data "
+                              f"(ej. {fuera[:5]}).")
+            plan = int(pd.to_numeric(cup[c_ups], errors="coerce").fillna(0).sum())
+            real = int(len(d_ups))
+            if plan and plan != real:
+                avisos.append(f"⚠️ UPS programadas {plan} vs UPS en Data {real} "
+                              f"(diferencia {plan - real:+d}).")
     return criticos, avisos
 
 
@@ -596,7 +751,7 @@ def render_sidebar(df: pd.DataFrame):
             st.info("Usando archivos subidos (carpeta `uploads`).")
         if st.button("↩️ Volver a archivos locales",
                      disabled=local, key="reset_files"):
-            for k in ("ruta_data", "ruta_crono", "ruta_campos", "last_up"):
+            for k in ("ruta_data", "ruta_crono", "ruta_crono_ups", "ruta_campos", "last_up"):
                 st.session_state.pop(k, None)
             st.cache_data.clear()
             st.rerun()
@@ -1168,8 +1323,9 @@ def main():
 
     # --- Campos dashboard: Estado de la sede, Categoría Novedad (Y) y novedades ---
     kpi_campos, nov_campos = cargar_campos()
-    kpi_norm, nov_norm = preparar_campos(kpi_campos, nov_campos)
-    nov_resumen = resumen_novedades(kpi_norm, nov_norm)
+    kpi_norm, nov_norm = preparar_campos(kpi_campos, nov_campos, df)
+    crono_ups_raw = cargar_crono_ups()
+    crono_ups = preparar_crono_ups(crono_ups_raw)
     fecha_corte = (nov_norm["_FECHA"].max() if (nov_norm is not None and not nov_norm.empty)
                    else None)
 
@@ -1204,9 +1360,28 @@ def main():
     modulo = modulo or opciones_mod[0]
     cod_mod = {"Componente 1": "C1", "Componente 2 (Impresoras láser)": "C2",
                "UPS": "UPS"}[modulo]
-    df_mod = df[df["_componente"].eq(cod_mod)].copy()
 
+    # UPS: estado de sede derivado del cronograma UPS (fecha + avance en MT)
+    if cod_mod == "UPS" and crono_ups is not None and not crono_ups.empty:
+        est_ups = estados_ups(df, crono_ups)
+        df["_est_crono"] = df["_SBAN"].map(est_ups).fillna("Sin cronograma")
+
+    df_mod = df[df["_componente"].eq(cod_mod)].copy()
     conteos = df["_componente"].value_counts().to_dict()
+
+    # Novedades aisladas por componente (no se trasladan entre módulos)
+    def _novedades_de(comp):
+        if kpi_norm is not None and "_comp" in kpi_norm.columns:
+            kc = kpi_norm[kpi_norm["_comp"].eq(comp)]
+        else:
+            kc = kpi_norm.iloc[0:0] if kpi_norm is not None else None
+        if nov_norm is not None and "_comp" in nov_norm.columns:
+            nc = nov_norm[nov_norm["_comp"].eq(comp)]
+        else:
+            nc = nov_norm.iloc[0:0] if nov_norm is not None else None
+        return resumen_novedades(kc, nc)
+
+    nov_resumen = _novedades_de(cod_mod)
 
     # --- Filtrado dinámico: oficina → atribución (Facturable) → solo pendientes ---
     mascara_office = pd.Series(True, index=df_mod.index)
@@ -1250,9 +1425,9 @@ def main():
     if p_crono_val.exists():
         criticos, avisos = validar_integridad(
             df, _cronograma_validacion(str(p_crono_val), os.path.getmtime(p_crono_val)),
-            kpi_campos, nov_campos)
+            kpi_campos, nov_campos, crono_ups_raw)
     else:
-        criticos, avisos = validar_integridad(df, None, kpi_campos, nov_campos)
+        criticos, avisos = validar_integridad(df, None, kpi_campos, nov_campos, crono_ups_raw)
         avisos.insert(0, "⚠️ Cronograma no disponible: el estado de la sede se toma de "
                          "Campos dashboard (col N).")
     if criticos:

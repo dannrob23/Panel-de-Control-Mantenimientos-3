@@ -41,6 +41,9 @@ def _elegir() -> dict:
         if "Dashboard_KPI" in xl.sheet_names:
             out.setdefault("campos", p)
             continue
+        if "UPS" in xl.sheet_names or "UPS" in p.name.upper():
+            out.setdefault("crono_ups", p)
+            continue
         cols = set(map(str, xl.parse(xl.sheet_names[0], nrows=0).columns))
         if {"Consecutivo mantenimiento 3", "Facturable"} <= cols:
             out.setdefault("data", p)
@@ -102,6 +105,15 @@ def main():
         c[[k for k in keep if k in c.columns]].to_excel(DATA / "Cronograma_actual.xlsx",
                                                         index=False, sheet_name="Hoja1")
         print("Cronograma anonimizado:", len(c))
+    if "crono_ups" in t:
+        xl = pd.ExcelFile(t["crono_ups"])
+        hoja = "UPS" if "UPS" in xl.sheet_names else xl.sheet_names[0]
+        u = xl.parse(hoja)
+        keep_u = ["SBAN", "TIPO", "Nombre Oficina", "Jefaturas  Operaciones Regional",
+                  "FECHA", "UPS"]
+        u[[k for k in keep_u if k in u.columns]].to_excel(
+            DATA / "Cronograma_UPS_actual.xlsx", index=False, sheet_name="UPS")
+        print("Cronograma UPS anonimizado:", len(u))
     _escribir_metadata()
     print("Listo. Revisar data/ y hacer commit/push.")
 
@@ -109,7 +121,8 @@ def main():
 def _escribir_metadata():
     import json
     info = {}
-    for nombre in ("Data_actual.xlsx", "Campos_actual.xlsx", "Cronograma_actual.xlsx"):
+    for nombre in ("Data_actual.xlsx", "Campos_actual.xlsx", "Cronograma_actual.xlsx",
+                   "Cronograma_UPS_actual.xlsx"):
         p = DATA / nombre
         if p.exists():
             info[nombre] = {"sha256": hashlib.sha256(p.read_bytes()).hexdigest(),

@@ -23,7 +23,8 @@ DATA.mkdir(exist_ok=True)
 
 DESTINOS = {"data": "Data_actual.xlsx",
             "campos": "Campos_actual.xlsx",
-            "crono": "Cronograma_actual.xlsx"}
+            "crono": "Cronograma_actual.xlsx",
+            "crono_ups": "Cronograma_UPS_actual.xlsx"}
 
 
 def _tipo(path: Path) -> str:
@@ -33,6 +34,8 @@ def _tipo(path: Path) -> str:
         return ""
     if "Dashboard_KPI" in xl.sheet_names:
         return "campos"
+    if "UPS" in xl.sheet_names or "UPS" in path.name.upper():
+        return "crono_ups"
     try:
         cols = set(map(str, xl.parse(xl.sheet_names[0], nrows=0).columns))
     except Exception:  # noqa: BLE001

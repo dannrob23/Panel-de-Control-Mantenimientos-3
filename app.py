@@ -517,11 +517,29 @@ def ruta_campos_act():
 
 
 def es_local(p: Path) -> bool:
+    """¿El archivo en uso es LOCAL del proyecto (no una carga subida por la web)?
+
+    Locales: carpeta `data/`, carpeta 'Ingesta de datos diaria' y las rutas canónicas.
+    NO local: cualquier archivo dentro de `uploads/` (subido desde el panel).
+    """
     try:
         r = p.resolve()
     except Exception:  # noqa: BLE001
         return False
-    return r in (RUTA_XLSX.resolve(), RUTA_CRONO.resolve())
+    cargas = str(DIR_CARGA.resolve()).lower()
+    rl = str(r).lower()
+    if rl == cargas or rl.startswith(cargas + os.sep):
+        return False                                    # proviene de uploads/
+    if r in (RUTA_XLSX.resolve(), RUTA_CRONO.resolve()):
+        return True
+    for carpeta in (CARPETA_DATA, CARPETA_INGESTA):
+        try:
+            base = str(carpeta.resolve()).lower()
+        except Exception:  # noqa: BLE001
+            continue
+        if rl == base or rl.startswith(base + os.sep):
+            return True
+    return False
 
 
 def _registrar_carga(tipo: str, archivo_original: str, destino: Path, sha: str, filas: int = 0):

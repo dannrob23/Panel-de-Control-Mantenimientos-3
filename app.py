@@ -1347,20 +1347,28 @@ def grafico_tendencia(datos: pd.DataFrame):
     except (ValueError, IndexError):
         relleno = "rgba(34,211,238,0.15)"
     fig = go.Figure()
-    fig.add_scatter(x=x, y=serie.values, name="Por día", mode="lines+markers",
-                    line=dict(color=t["celeste"], width=2.5), marker=dict(size=6),
+    fig.add_scatter(x=x, y=serie.values, name="Por día", mode="lines+markers+text",
+                    line=dict(color=t["celeste"], width=2.5), marker=dict(size=7),
+                    text=[str(int(v)) for v in serie.values], textposition="top center",
+                    textfont=dict(size=10, color=t["ink"]), cliponaxis=False,
                     fill="tozeroy", fillcolor=relleno,
                     hovertemplate="%{x}<br>MT3 del día: %{y}<extra></extra>")
     fig.add_scatter(x=x, y=acum.values, name="Acumulado", mode="lines",
                     line=dict(color=t["verde"], width=2, dash="dot"), yaxis="y2",
                     hovertemplate="%{x}<br>Acumulado: %{y}<extra></extra>")
+    total_d = int(serie.sum())
     fig.update_layout(
-        title=dict(text="<b>Tendencia MT3 (realizados por día)</b>",
+        title=dict(text=f"<b>Tendencia MT3 (realizados por día)</b>"
+                        f"<br><span style='font-size:11px'>Total: {total_d} MT3 · "
+                        f"último día: {x[-1]} ({int(serie.iloc[-1])})</span>",
                    font=dict(size=15, color=t["ink"]), x=0.02),
-        height=340, margin=dict(l=10, r=10, t=55, b=10),
-        xaxis=dict(title="", gridcolor=t["grid"], zeroline=False),
-        yaxis=dict(title="Por día", rangemode="tozero", gridcolor=t["grid"]),
-        yaxis2=dict(title="Acumulado", overlaying="y", side="right", showgrid=False),
+        height=360, margin=dict(l=10, r=10, t=65, b=10),
+        xaxis=dict(title="", gridcolor=t["grid"], zeroline=False,
+                   tickfont=dict(color=t["muted"])),
+        yaxis=dict(title="Por día", rangemode="tozero", gridcolor=t["grid"],
+                   tickfont=dict(color=t["muted"])),
+        yaxis2=dict(title="Acumulado", overlaying="y", side="right", showgrid=False,
+                    tickfont=dict(color=t["muted"])),
         legend=dict(orientation="h", y=1.02, x=0, font=dict(color=t["muted"])),
         **plotly_base(),
     )
@@ -1438,7 +1446,7 @@ def grafico_bullet_oficinas(datos: pd.DataFrame):
 
 
 def grafico_sparkline_tendencia(datos: pd.DataFrame):
-    """Mini tendencia de MT3 por día, sin ejes ni cifras (para vista ejecutiva)."""
+    """Tendencia MT3 por día con valores y ejes visibles (lectura a primera vista)."""
     t = tema_actual()
     if "Fecha de mantenimiento 3" not in datos.columns:
         return None
@@ -1454,14 +1462,26 @@ def grafico_sparkline_tendencia(datos: pd.DataFrame):
         relleno = f"rgba({rr},{gg},{bb},0.15)"
     except (ValueError, IndexError):
         relleno = "rgba(34,211,238,0.15)"
+    etiquetas = [str(int(v)) for v in serie.values] if len(serie) <= 18 else None
     fig = go.Figure(go.Scatter(
-        x=[f"{f:%d/%m}" for f in serie.index], y=serie.values, mode="lines",
-        line=dict(color=t["celeste"], width=2), fill="tozeroy", fillcolor=relleno,
+        x=[f"{f:%d/%m}" for f in serie.index], y=serie.values,
+        mode="lines+markers+text" if etiquetas else "lines+markers",
+        text=etiquetas, textposition="top center",
+        textfont=dict(size=10, color=t["ink"]),
+        line=dict(color=t["celeste"], width=2), marker=dict(size=7),
+        fill="tozeroy", fillcolor=relleno, cliponaxis=False,
         hovertemplate="%{x}<br>%{y} MT3<extra></extra>"))
+    total_d = int(serie.sum())
     fig.update_layout(
-        title=dict(text="<b>Tendencia MT3 por día</b>", font=dict(size=15, color=t["ink"]), x=0.02),
-        height=200, margin=dict(l=10, r=10, t=40, b=10), showlegend=False,
-        xaxis=dict(visible=False), yaxis=dict(visible=False),
+        title=dict(text=f"<b>Tendencia MT3 por día</b>"
+                        f"<br><span style='font-size:11px'>Total: {total_d} MT3 · "
+                        f"último día: {serie.index[-1]:%d/%m} ({int(serie.iloc[-1])})</span>",
+                   font=dict(size=15, color=t["ink"]), x=0.02),
+        height=280, margin=dict(l=10, r=10, t=62, b=10), showlegend=False,
+        xaxis=dict(title="", tickfont=dict(size=10, color=t["muted"]),
+                   gridcolor=t["grid"], zeroline=False),
+        yaxis=dict(title="", rangemode="tozero", tickfont=dict(size=10, color=t["muted"]),
+                   gridcolor=t["grid"]),
         **plotly_base(),
     )
     return fig
@@ -2310,7 +2330,7 @@ def main():
                 grafico_gauge(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
                 width="stretch", config=cfg_chart)
 
-        fila2a, fila2b = st.columns([1.4, 1])
+        fila2a, fila2b = st.columns([1, 1.3])
         with fila2a:
             top_n = st.segmented_control("Sedes a mostrar en el ranking",
                                          options=[5, 10, 12, 15, 20, 25], default=12,

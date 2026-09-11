@@ -65,7 +65,7 @@ TEMAS = {
         "verde": "#34D399", "rojo": "#FB7185", "ambar": "#FBBF24", "morado": "#A78BFA",
         "celeste": "#22D3EE", "sombra": "0 12px 30px rgba(0,0,0,.35)",
         "pend": "#FBBF24", "pista": "rgba(255,255,255,.08)",
-        "heat": ["#101827", "#164E63", "#0E7490", "#22D3EE"], "heat_border": "#0A0E14",
+        "heat": ["#2B1B0E", "#8C4A0F", "#E8850F", "#FFD166"], "heat_border": "#0A0E14",
     },
     "claro": {
         "bg": "#F2F5F9", "bg_soft": "#FFFFFF", "card": "#FFFFFF",
@@ -74,7 +74,7 @@ TEMAS = {
         "verde": "#2E9E5B", "rojo": "#D64541", "ambar": "#D97706", "morado": "#6D28D9",
         "celeste": "#2E75B6", "sombra": "0 1px 3px rgba(16,24,40,.08)",
         "pend": "#EAB308", "pista": "#EDF1F6",
-        "heat": ["#F4F8FC", "#BFD6EA", "#2E75B6", "#1F4E78"], "heat_border": "#FFFFFF",
+        "heat": ["#FFF7E6", "#FEE391", "#FE9929", "#D7301F"], "heat_border": "#FFFFFF",
     },
 }
 
@@ -1310,6 +1310,26 @@ def grafico_tendencia(datos: pd.DataFrame):
     return fig
 
 
+def _color_en_escala(escala, frac):
+    """Interpola un color (RGB) en la escala, en la posición 0..1 (igual que Plotly)."""
+    def rgb(h):
+        h = str(h).lstrip("#")
+        return tuple(int(h[k:k + 2], 16) for k in (0, 2, 4))
+    n = len(escala) - 1
+    pos = max(0.0, min(1.0, float(frac))) * n
+    i = int(pos)
+    f = pos - i
+    c1, c2 = rgb(escala[min(i, n)]), rgb(escala[min(i + 1, n)])
+    return tuple(round(a + (b - a) * f) for a, b in zip(c1, c2))
+
+
+def _texto_contraste(escala, frac):
+    """Color de texto legible sobre el color de la escala (blanco u oscuro)."""
+    r, g, b = _color_en_escala(escala, frac)
+    lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+    return "#0A0E14" if lum > 0.55 else "#FFFFFF"
+
+
 def grafico_heatmap(datos: pd.DataFrame):
     """Heatmap Regional × Estado con pendientes, total y avance."""
     t = tema_actual()
@@ -1335,16 +1355,27 @@ def grafico_heatmap(datos: pd.DataFrame):
 
     custom = [[[int(total.iloc[i, j]), f"{avance.iloc[i, j]:.0f}%"]
                for j in range(len(cols))] for i in range(len(pend.index))]
+    zmax = float(pend.values.max()) if pend.values.size else 1.0
+    zmin = float(pend.values.min()) if pend.values.size else 0.0
     fig = go.Figure(go.Heatmap(
         z=pend.values, x=cols, y=list(pend.index),
-        text=[[f"{int(v)}" for v in fila] for fila in pend.values],
-        texttemplate="%{text}", textfont=dict(size=11, color=t["ink"]),
+        zmin=zmin, zmax=zmax,                     # escala anclada al rango real
         customdata=custom, colorscale=t["heat"], xgap=3, ygap=3,
         colorbar=dict(title=dict(text="Pendientes", font=dict(color=t["ink"])),
                       tickfont=dict(color=t["muted"])),
         hovertemplate="<b>%{y}</b> · %{x}<br>Pendientes: %{z}<br>"
                       "Total: %{customdata[0]}<br>Avance MT3: %{customdata[1]}<extra></extra>",
     ))
+    # Etiquetas con color calculado (contraste garantizado sobre cualquier tono del calor)
+    for i, reg in enumerate(pend.index):
+        for j, est in enumerate(cols):
+            v = int(pend.values[i][j])
+            if v <= 0:
+                continue
+            frac = (v - zmin) / (zmax - zmin) if zmax > zmin else 1.0
+            fig.add_annotation(x=est, y=reg, text=f"{v:,}".replace(",", "."),
+                               showarrow=False, xref="x", yref="y",
+                               font=dict(size=11, color=_texto_contraste(t["heat"], frac)))
     fig.update_layout(
         title=dict(text="<b>Mapa de calor: pendientes por Regional y Estado</b>",
                    font=dict(size=15, color=t["ink"]), x=0.02),

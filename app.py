@@ -38,6 +38,283 @@ try:
 except Exception:  # noqa: BLE001
     MODO_PUBLICO = True
 
+# Regla de negocio: las impresoras láser (Componente 2) SE FACTURAN al Banco.
+# ⚠️ ACTIVADA por decisión del negocio (COLSOF). El Excel de origen (Data) las trae como
+# 'No', así que el panel aplica esta regla y la anuncia con un chip en el encabezado.
+IMPRESORAS_FACTURABLES = True
+
+
+# ----------------------------------------------------------------------------
+# Tema visual: OSCURO premium (por defecto) y CLARO institucional
+# El usuario alterna con el toggle de la barra superior derecha.
+# ----------------------------------------------------------------------------
+TEMAS = {
+    "oscuro": {
+        "bg": "#0A0E14", "bg_soft": "#0F1522", "card": "#141C2D",
+        "border": "rgba(255,255,255,.08)", "ink": "#E6EAF2", "muted": "#7C8AA5",
+        "grid": "rgba(255,255,255,.08)", "primario": "#22D3EE", "btn_prim_ink": "#04121A",
+        "verde": "#34D399", "rojo": "#FB7185", "ambar": "#FBBF24", "morado": "#A78BFA",
+        "celeste": "#22D3EE", "sombra": "0 12px 30px rgba(0,0,0,.35)",
+        "pend": "#FBBF24", "pista": "rgba(255,255,255,.08)",
+        "heat": ["#101827", "#164E63", "#0E7490", "#22D3EE"], "heat_border": "#0A0E14",
+    },
+    "claro": {
+        "bg": "#F2F5F9", "bg_soft": "#FFFFFF", "card": "#FFFFFF",
+        "border": "#E3E8EF", "ink": "#1B2430", "muted": "#64748B",
+        "grid": "#EDF1F6", "primario": "#1F4E78", "btn_prim_ink": "#FFFFFF",
+        "verde": "#2E9E5B", "rojo": "#D64541", "ambar": "#D97706", "morado": "#6D28D9",
+        "celeste": "#2E75B6", "sombra": "0 1px 3px rgba(16,24,40,.08)",
+        "pend": "#EAB308", "pista": "#EDF1F6",
+        "heat": ["#F4F8FC", "#BFD6EA", "#2E75B6", "#1F4E78"], "heat_border": "#FFFFFF",
+    },
+}
+
+_CSS_TEMA = '''
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+html, body, .stApp, [class*="css"] { font-family: 'Inter', system-ui, sans-serif !important; }
+.stApp { background: __BG__ !important; }
+[data-testid="stHeader"] { background: transparent !important; }
+[data-testid="stSidebar"] { background: __BGSOFT__ !important; border-right: 1px solid __BORDER__ !important; }
+[data-testid="stSidebar"] p, [data-testid="stSidebar"] span, [data-testid="stSidebar"] label,
+[data-testid="stSidebar"] li, [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 { color: __INK__ !important; }
+h1, h2, h3, h4 { color: __INK__ !important; font-weight: 800 !important; letter-spacing: -.4px; }
+p, li, label { color: __INK__ !important; }
+[data-testid="stCaptionContainer"] p, .stCaption, small { color: __MUTED__ !important; }
+[data-testid="stMetric"] { background: __CARD__ !important; border: 1px solid __BORDER__ !important;
+  border-radius: 14px; padding: 14px 16px; box-shadow: __SOMBRA__; }
+[data-testid="stMetricValue"] { color: __INK__ !important; font-weight: 800 !important;
+  font-size: 1.8rem !important; letter-spacing: -.6px; }
+[data-testid="stMetricLabel"] p { color: __MUTED__ !important; font-weight: 600 !important;
+  font-size: .82rem !important; white-space: normal !important; overflow: visible !important;
+  text-overflow: clip !important; line-height: 1.25 !important; }
+.stButton > button { border-radius: 10px !important; border: 1px solid __BORDER__ !important;
+  background: __CARD__ !important; color: __INK__ !important; font-weight: 600 !important; }
+.stButton > button p { color: inherit !important; }
+.stButton > button[kind="primary"], .stButton > button[data-testid="baseButton-primary"] {
+  background: __PRIMARY__ !important; border-color: __PRIMARY__ !important; }
+.stButton > button[kind="primary"] p, .stButton > button[data-testid="baseButton-primary"] p {
+  color: __BTNINK__ !important; }
+[data-testid="stExpander"] { border: 1px solid __BORDER__ !important; border-radius: 12px !important;
+  background: __CARD__ !important; }
+[data-testid="stExpander"] summary p { color: __INK__ !important; font-weight: 600; }
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] { border: 1px solid __BORDER__ !important;
+  border-radius: 12px !important; }
+[data-testid="stAlert"] { border-radius: 12px !important; }
+hr { border-color: __BORDER__ !important; }
+.stProgress > div > div > div > div { background: __VERDE__ !important; }
+[data-baseweb="select"] > div, [data-baseweb="input"] > div { background: __CARD__ !important;
+  border-color: __BORDER__ !important; }
+[data-baseweb="select"] div, [data-baseweb="input"] input { color: __INK__ !important; }
+[data-testid="stFileUploaderDropzone"] { background: __CARD__ !important; border-color: __BORDER__ !important; }
+/* Controles tipo botón (segmented control / pills / uploader) en ambos temas */
+[data-testid="stBaseButton-secondary"], [data-testid="stBaseButton-primary"],
+[data-testid="stBaseButton-segmented_control"], [data-testid="stBaseButton-pills"] {
+  background: __CARD__ !important; color: __INK__ !important; border-color: __BORDER__ !important; }
+[data-testid="stBaseButton-segmented_control"] p, [data-testid="stBaseButton-pills"] p,
+[data-testid="stBaseButton-secondary"] p { color: __INK__ !important; }
+[data-testid="stBaseButton-segmented_control"][aria-checked="true"],
+[data-testid="stBaseButton-pills"][aria-checked="true"],
+[data-testid="stBaseButton-secondary"][aria-pressed="true"] {
+  background: __PRIMARY__ !important; border-color: __PRIMARY__ !important; }
+[data-testid="stBaseButton-segmented_control"][aria-checked="true"] p,
+[data-testid="stBaseButton-pills"][aria-checked="true"] p { color: __BTNINK__ !important; }
+[data-testid="stSegmentedControl"] { background: transparent !important; }
+[data-testid="stSegmentedControl"] > div { background: __CARD__ !important; border-radius: 12px; }
+/* Segmented control / pills (selector de módulo, ranking, etc.) — se estilizan por rol ARIA */
+button[role="radio"] { background: __CARD__ !important; color: __INK__ !important;
+  border: 1px solid __BORDER__ !important; }
+button[role="radio"] p, button[role="radio"] span { color: __INK__ !important; font-weight: 600 !important; }
+button[role="radio"][aria-checked="true"] { background: __PRIMARY__ !important;
+  border-color: __PRIMARY__ !important; }
+button[role="radio"][aria-checked="true"] p, button[role="radio"][aria-checked="true"] span {
+  color: __BTNINK__ !important; }
+/* Pestañas (Gráficos / Resumen / Gestión) */
+[data-testid="stTabs"] button[role="tab"] { border-radius: 10px 10px 0 0 !important; }
+[data-testid="stTabs"] button[role="tab"] p { color: __MUTED__ !important; font-weight: 600 !important;
+  font-size: .95rem !important; }
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] { background: __CARD__ !important; }
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p { color: __INK__ !important; }
+[data-testid="stTabs"] [data-baseweb="tab-highlight"] { background: __PRIMARY__ !important; }
+[data-testid="stTabs"] [data-baseweb="tab-border"] { background: __BORDER__ !important; }
+[data-testid="stFileUploader"] button { background: __CARD__ !important; color: __INK__ !important;
+  border: 1px solid __BORDER__ !important; border-radius: 10px !important; }
+[data-testid="stFileUploader"] button * { color: __INK__ !important; }
+[data-testid="stFileUploader"] span, [data-testid="stFileUploader"] small { color: __MUTED__ !important; }
+[data-testid="stToolbar"] button, [data-testid="stToolbar"] span, [data-testid="stToolbar"] a {
+  color: __MUTED__ !important; }
+[data-testid="stMainMenu"] { color: __MUTED__ !important; }
+
+/* ================= RESPONSIVE (tablet y móvil) ================= */
+@media (max-width: 1000px) {
+  [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; gap: .55rem !important; }
+  [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { flex: 1 1 46% !important; min-width: 46% !important; }
+  [data-testid="stMainBlockContainer"] { padding: 1rem 1rem 2.5rem !important; }
+}
+@media (max-width: 680px) {
+  [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { flex: 1 1 100% !important; min-width: 100% !important; }
+  #mt3-hero-titulo { font-size: 19px !important; line-height: 1.2 !important; }
+  #mt3-hero-sub { font-size: 12px !important; }
+  [data-testid="stMetricValue"] { font-size: 1.45rem !important; }
+  [data-testid="stMetric"] { padding: 11px 13px !important; }
+  [data-testid="stMainBlockContainer"] { padding: .8rem .7rem 2.5rem !important; }
+  p, li, label { font-size: .93rem !important; }
+  h1, h2, h3 { font-size: 1.05rem !important; }
+  [data-testid="stSidebar"] { min-width: 265px !important; }
+  .stButton > button, [data-testid="stBaseButton-secondary"], [data-testid="stBaseButton-primary"] {
+    min-height: 40px !important; }
+}
+</style>
+'''
+
+
+def tema_actual() -> dict:
+    """Tokens del tema activo (oscuro por defecto)."""
+    if "tema" not in st.session_state:
+        st.session_state["tema"] = "oscuro"
+    return TEMAS.get(st.session_state["tema"], TEMAS["oscuro"])
+
+
+def es_oscuro() -> bool:
+    return st.session_state.get("tema", "oscuro") == "oscuro"
+
+
+def aplicar_css():
+    """Inyecta el CSS del tema activo (fondos, tarjetas, tipografía, controles)."""
+    t = tema_actual()
+    css = (_CSS_TEMA
+           .replace("__BG__", t["bg"]).replace("__BGSOFT__", t["bg_soft"])
+           .replace("__CARD__", t["card"]).replace("__BORDER__", t["border"])
+           .replace("__INK__", t["ink"]).replace("__MUTED__", t["muted"])
+           .replace("__PRIMARY__", t["primario"]).replace("__VERDE__", t["verde"])
+           .replace("__SOMBRA__", t["sombra"]).replace("__BTNINK__", t["btn_prim_ink"]))
+    st.markdown(css, unsafe_allow_html=True)
+
+
+def barra_tema():
+    """Toggle de vista (oscura/clara) — píldoras arriba a la derecha."""
+    _vacio, c_osc, c_cla = st.columns([6.6, 1.5, 1.5], vertical_alignment="center")
+    with c_osc:
+        if st.button("🌙 Oscuro", key="btn_tema_osc", use_container_width=True,
+                     type="primary" if es_oscuro() else "secondary"):
+            st.session_state["tema"] = "oscuro"
+            st.rerun()
+    with c_cla:
+        if st.button("☀️ Claro", key="btn_tema_cla", use_container_width=True,
+                     type="secondary" if es_oscuro() else "primary"):
+            st.session_state["tema"] = "claro"
+            st.rerun()
+
+
+def plotly_base() -> dict:
+    """Colores base de los gráficos según el tema activo (Plotly afinado)."""
+    t = tema_actual()
+    return dict(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Inter, system-ui, sans-serif", color=t["ink"], size=12),
+        colorway=[t["celeste"], t["verde"], t["ambar"], t["rojo"], t["morado"]],
+    )
+
+
+def dias_desde_actualizacion():
+    """Días transcurridos desde la última actualización de datos (None si no se sabe)."""
+    try:
+        f = pd.to_datetime(leer_ultima_actualizacion(), errors="coerce")
+        if pd.isna(f):
+            return None
+        return int((pd.Timestamp.now().normalize() - f.normalize()).days)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def encabezado_hero(modulo: str, scope: str, atrib: str, n_equipos: int,
+                    conteos: dict, nov_resumen=None, fecha_corte=None):
+    """Encabezado tipo 'hero' con chips de contexto (estilo Propuesta 2)."""
+    t = tema_actual()
+
+    def chip(txt: str, tono: str = "neutro") -> str:
+        colores = {
+            "neutro": (f"{t['card']}", f"{t['border']}", f"{t['muted']}"),
+            "ok": (f"{t['verde']}22", f"{t['verde']}55", f"{t['verde']}"),
+            "aviso": (f"{t['ambar']}22", f"{t['ambar']}55", f"{t['ambar']}"),
+            "prim": (f"{t['primario']}22", f"{t['primario']}55", f"{t['primario']}"),
+        }[tono]
+        return (f'<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;'
+                f'padding:5px 11px;border-radius:999px;background:{colores[0]};border:1px solid {colores[1]};'
+                f'color:{colores[2]};white-space:nowrap">{txt}</span>')
+
+    nov_txt = ""
+    if (nov_resumen is not None and not nov_resumen.empty
+            and "Novedades del día" in nov_resumen.columns and pd.notna(fecha_corte)):
+        nov_txt = (f" · Novedades del día: <b>{int(nov_resumen['Novedades del día'].sum())}</b> "
+                   f"(corte {fecha_corte:%d/%m/%Y})")
+
+    _dias = dias_desde_actualizacion()
+    _chip_viejo = (chip(f"⚠️ Datos de hace {_dias} días", "aviso")
+                   if (_dias is not None and _dias >= 3) else "")
+    _chip_regla = (chip("ℹ️ Impresoras: facturables (Si)", "aviso")
+                   if IMPRESORAS_FACTURABLES else "")
+
+    st.markdown(
+        f'<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;'
+        f'flex-wrap:wrap;padding:2px 0 14px;border-bottom:1px solid {t["border"]};margin:4px 0 12px">'
+        f'  <div>'
+        f'    <div id="mt3-hero-titulo" style="font-size:26px;font-weight:800;letter-spacing:-.7px;'
+        f'color:{t["ink"]};line-height:1.15">🛠️ Control Mantenimiento Preventivo 3</div>'
+        f'    <div id="mt3-hero-sub" style="font-size:13px;color:{t["muted"]};margin-top:5px">'
+        f'Vista: <b>{scope}</b> · Atribución: <b>{atrib}</b> · <b>{f"{n_equipos:,}".replace(",", ".")}</b> equipos'
+        f'    </div>'
+        f'  </div>'
+        f'  <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">'
+        f'    {chip("📦 " + modulo, "prim")}{chip("Operativo", "ok")}'
+        f'    {chip("🕒 " + str(leer_ultima_actualizacion()))}'
+        + _chip_regla
+        + _chip_viejo
+        + (chip("🔒 Modo público", "aviso") if MODO_PUBLICO else "")
+        + f'  </div>'
+        f'</div>'
+        f'<div style="font-size:12px;color:{t["muted"]};margin:-4px 0 10px">'
+        f'Totales base: Componente 1 = {conteos.get("C1", 0):,} · '
+        f'Componente 2 (láser) = {conteos.get("C2", 0):,} · UPS = {conteos.get("UPS", 0):,}'
+        f'{nov_txt}</div>'.replace(",", "."),
+        unsafe_allow_html=True,
+    )
+
+
+def barra_filtros_activos(seleccion, solo_pendientes, f_attr, click_sban):
+    """Chips de filtros activos, cada uno con botón para quitarlo de un toque."""
+    activos = []
+    if seleccion:
+        if len(seleccion) == 1:
+            txt = seleccion[0][:26] + ("…" if len(seleccion[0]) > 26 else "")
+        else:
+            txt = f"{len(seleccion)} oficinas"
+        activos.append(("🏢 " + txt, "f_oficinas"))
+    if solo_pendientes:
+        activos.append(("⚠️ Solo pendientes", "f_solo_pend"))
+    if f_attr != "T":
+        activos.append(("🏦 BANCO" if f_attr == "Si" else "🏢 COLSOF", "f_atrib"))
+    if click_sban:
+        activos.append((f"🎯 SBAN {click_sban}", "click_sban"))
+    if not activos:
+        return
+    cols = st.columns([1.05] + [1.15] * len(activos), vertical_alignment="center")
+    with cols[0]:
+        st.caption("Filtros activos:")
+    for col, (etiqueta, clave) in zip(cols[1:], activos):
+        with col:
+            if st.button("✖ " + etiqueta, key=f"quitar_{clave}", use_container_width=True):
+                if clave == "f_oficinas":
+                    st.session_state["f_oficinas"] = []
+                elif clave == "f_solo_pend":
+                    st.session_state["f_solo_pend"] = False
+                elif clave == "f_atrib":
+                    st.session_state["f_atrib"] = "Todos"
+                else:
+                    st.session_state.pop("click_sban", None)
+                st.rerun()
+
 
 # ----------------------------------------------------------------------------
 # Descubrimiento de archivos de la ingesta diaria (data / campos / cronograma)
@@ -730,6 +1007,18 @@ def obs_estado() -> dict:
 # ----------------------------------------------------------------------------
 def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
     with st.sidebar:
+        t = tema_actual()
+        _logo_txt = "#04121A" if es_oscuro() else "#FFFFFF"
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:11px;padding:2px 0 12px;'
+            f'border-bottom:1px solid {t["border"]};margin-bottom:12px">'
+            f'  <div style="width:38px;height:38px;border-radius:11px;display:grid;place-items:center;'
+            f'font-weight:800;font-size:14px;color:{_logo_txt};background:{t["primario"]}">MT3</div>'
+            f'  <div><div style="font-size:14.5px;font-weight:700;color:{t["ink"]}">Panel MT3</div>'
+            f'  <div style="font-size:11.5px;color:{t["muted"]}">Banco Agrario · COLSOF</div></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
         st.markdown("## 📂 Ingesta diaria")
         st.caption("Sube los .xlsx del día: **Data**, **Campos dashboard** y/o **Cronograma**. "
                    "El tipo se detecta solo y queda bitácora en `uploads\\bitacora_cargas.csv`.")
@@ -783,19 +1072,43 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
             help="Filtra la tabla y métricas a los equipos que aún no tienen consecutivo MT3.",
         )
 
+        # --- Filtro de facturación ADAPTATIVO al módulo (Opción A) ---
+        # Solo se ofrecen las opciones que EXISTEN en el módulo activo. Si el módulo es
+        # de una sola categoría, se informa con una etiqueta en lugar de un filtro inútil.
+        _tiene_si = bool((base_mod["Facturable"] == "Si").any()) if "Facturable" in base_mod else True
+        _tiene_no = bool((base_mod["Facturable"] == "No").any()) if "Facturable" in base_mod else True
         if "f_atrib" not in st.session_state:
             st.session_state["f_atrib"] = "Todos"
-        f_attr_label = st.radio(
-            "Distinguir por facturación (AN)",
-            options=["Todos", "BANCO (Facturable Si)", "COLSOF (No facturable)"],
-            key="f_atrib",
-            help="Según columna Facturable: Si = atribuible a BANCO · No = gestión COLSOF.",
-        )
+        if _tiene_si and _tiene_no:
+            f_attr_label = st.radio(
+                "Distinguir por facturación (AN)",
+                options=["Todos", "BANCO (Facturable Si)", "COLSOF (No facturable)"],
+                key="f_atrib",
+                help="Según columna Facturable: Si = atribuible a BANCO · No = gestión COLSOF.",
+            )
+        else:
+            st.session_state["f_atrib"] = "Todos"   # nunca deja la vista vacía
+            f_attr_label = "Todos"
+            if _tiene_si:
+                st.info("ℹ️ Este módulo es **100% Facturable (BANCO)** — no requiere filtro.")
+            else:
+                st.info("ℹ️ Este módulo es **100% No facturable (COLSOF)** — no requiere filtro.")
         f_attr = {"Todos": "T",
                   "BANCO (Facturable Si)": "Si",
                   "COLSOF (No facturable)": "No"}[f_attr_label]
 
         st.divider()
+        if st.button("🧹 Limpiar todos los filtros", width="stretch", key="limpiar_filtros"):
+            st.session_state["f_oficinas"] = []
+            st.session_state["f_solo_pend"] = False
+            st.session_state["f_atrib"] = "Todos"
+            st.session_state.pop("click_sban", None)
+            for _k in ("res_estado", "res_catnov"):
+                st.session_state.pop(_k, None)
+            st.session_state["res_min_av"] = 0
+            st.session_state["res_solo_pend"] = False
+            st.session_state["res_solo_nov"] = False
+            st.rerun()
         if st.button("🔄 Recargar datos", width="stretch"):
             st.cache_data.clear()
             st.rerun()
@@ -838,16 +1151,20 @@ def render_kpis(datos: pd.DataFrame):
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("📦 Total de elementos", f"{total:,}".replace(",", "."),
-              help="Equipos en la(s) oficina(s) seleccionada(s)")
+              help="Equipos en la(s) oficina(s) seleccionada(s)", border=True)
     c2.metric("✅ Mantenimientos realizados (MT)", f"{realizados:,}".replace(",", "."),
-              help="Filas cuyo 'Consecutivo mantenimiento 3' empieza por MT")
+              help="Filas cuyo 'Consecutivo mantenimiento 3' empieza por MT", border=True)
     c3.metric("⚠️ Mantenimientos pendientes", f"{pendientes:,}".replace(",", "."),
               delta=f"{pendientes/total*100:.1f}%" if total else "0%",
-              delta_color="inverse", help="Total de elementos − Realizados")
+              delta_color="inverse", help="Total de elementos − Realizados", border=True)
     c4.metric("🏦 Facturables (Si)", f"{fact_si:,}".replace(",", "."),
-              help="Elementos atribuibles a BANCO")
+              help="Elementos atribuibles a BANCO", border=True)
     c5.metric("🏢 No facturables (No)", f"{fact_no:,}".replace(",", "."),
-              help="Elementos de gestión COLSOF")
+              help="Elementos de gestión COLSOF", border=True)
+    st.caption(
+        f"Facturación del filtro actual — BANCO (Si): **{fact_si:,}** · "
+        f"COLSOF (No): **{fact_no:,}** · Total: **{total:,}**".replace(",", ".")
+    )
     return total, realizados, pendientes, fact_si, fact_no
 
 
@@ -855,60 +1172,60 @@ def render_kpis(datos: pd.DataFrame):
 # Gráficas Plotly
 # ----------------------------------------------------------------------------
 def grafico_dona(realizados: int, pendientes: int):
+    t = tema_actual()
     total = realizados + pendientes
     pct = (realizados / total * 100) if total else 0.0
     fig = go.Figure(go.Pie(
         labels=["✅ Subsanados (MT)", "⚠️ Pendientes"],
         values=[realizados, pendientes],
         hole=0.68,
-        marker=dict(colors=["#2E9E5B", "#D64541"], line=dict(color="#FFFFFF", width=2)),
+        marker=dict(colors=[t["verde"], t["pend"]], line=dict(color=t["card"], width=3)),
         textinfo="none",
         hovertemplate="<b>%{label}</b><br>%{value:,} equipos (%{percent})<extra></extra>",
     ))
     fig.update_layout(
         title=dict(text="<b>Avance de Mantenimiento Preventivo 3</b>",
-                   font=dict(size=15), x=0.02),
+                   font=dict(size=15, color=t["ink"]), x=0.02),
         annotations=[dict(
-            text=(f"<span style='font-size:28px;font-weight:700'>{pct:.1f}%</span>"
-                  f"<br><span style='font-size:11px;letter-spacing:.5px'>AVANCE GLOBAL</span>"),
+            text=(f"<span style='font-size:28px;font-weight:700;color:{t['ink']}'>{pct:.1f}%</span>"
+                  f"<br><span style='font-size:11px;letter-spacing:.5px;color:{t['muted']}'>AVANCE GLOBAL</span>"),
             x=0.5, y=0.5, showarrow=False, align="center")],
         margin=dict(l=15, r=15, t=45, b=10),
         height=360,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
         showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.08, xanchor="center", x=0.5),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.08, xanchor="center", x=0.5,
+                    font=dict(color=t["muted"])),
+        **plotly_base(),
     )
     return fig
 
 
 def grafico_gauge(realizados: int, pendientes: int):
     """Gauge ejecutivo con el % de avance global."""
+    t = tema_actual()
     total = realizados + pendientes
     pct = (realizados / total * 100) if total else 0.0
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=round(pct, 1),
-        number=dict(suffix="%", font=dict(size=30)),
-        title=dict(text=f"Avance MT3 global<br><span style='font-size:11px'>"
+        number=dict(suffix="%", font=dict(size=30, color=t["ink"])),
+        title=dict(text=f"Avance MT3 global<br><span style='font-size:11px;color:{t['muted']}'>"
                         f"{realizados:,} de {total:,} equipos</span>".replace(",", "."),
-                   font=dict(size=14)),
+                   font=dict(size=14, color=t["ink"])),
         gauge=dict(
-            axis=dict(range=[0, 100]),
-            bar=dict(color="#2E9E5B"),
-            steps=[dict(range=[0, 50], color="#FBE6E5"),
-                   dict(range=[50, 80], color="#FDF0DC"),
-                   dict(range=[80, 100], color="#E3F2E8")],
-            threshold=dict(line=dict(color="#1F4E78", width=3), thickness=0.75, value=pct),
+            axis=dict(range=[0, 100], visible=False),
+            bar=dict(color=t["verde"], thickness=0.30),
+            bgcolor=t["pista"],
+            borderwidth=0,
         ),
     ))
-    fig.update_layout(height=340, margin=dict(l=25, r=25, t=70, b=10),
-                      paper_bgcolor="rgba(0,0,0,0)")
+    fig.update_layout(height=340, margin=dict(l=25, r=25, t=70, b=10), **plotly_base())
     return fig
 
 
 def grafico_tendencia(datos: pd.DataFrame):
     """Tendencia diaria y acumulada de MT3 (usa Fecha de mantenimiento 3)."""
+    t = tema_actual()
     if "Fecha de mantenimiento 3" not in datos.columns:
         return None
     d = datos[datos["_mt"]].copy()
@@ -921,25 +1238,30 @@ def grafico_tendencia(datos: pd.DataFrame):
     x = [f"{f:%d/%m}" for f in serie.index]
     fig = go.Figure()
     fig.add_scatter(x=x, y=serie.values, name="Por día", mode="lines+markers",
-                    line=dict(color="#2E75B6", width=2), marker=dict(size=6),
+                    line=dict(color=t["celeste"], width=2.5), marker=dict(size=6),
+                    fill="tozeroy",
+                    fillgradient=dict(type="vertical",
+                                      colorscale=[[0, t["celeste"] + "00"], [1, t["celeste"] + "66"]]),
                     hovertemplate="%{x}<br>MT3 del día: %{y}<extra></extra>")
     fig.add_scatter(x=x, y=acum.values, name="Acumulado", mode="lines",
-                    line=dict(color="#70AD47", width=2, dash="dot"), yaxis="y2",
+                    line=dict(color=t["verde"], width=2, dash="dot"), yaxis="y2",
                     hovertemplate="%{x}<br>Acumulado: %{y}<extra></extra>")
     fig.update_layout(
-        title=dict(text="<b>Tendencia MT3 (realizados por día)</b>", font=dict(size=15), x=0.02),
+        title=dict(text="<b>Tendencia MT3 (realizados por día)</b>",
+                   font=dict(size=15, color=t["ink"]), x=0.02),
         height=340, margin=dict(l=10, r=10, t=55, b=10),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(title="", gridcolor="rgba(128,128,128,.2)"),
-        yaxis=dict(title="Por día", rangemode="tozero"),
+        xaxis=dict(title="", gridcolor=t["grid"], zeroline=False),
+        yaxis=dict(title="Por día", rangemode="tozero", gridcolor=t["grid"]),
         yaxis2=dict(title="Acumulado", overlaying="y", side="right", showgrid=False),
-        legend=dict(orientation="h", y=1.02, x=0),
+        legend=dict(orientation="h", y=1.02, x=0, font=dict(color=t["muted"])),
+        **plotly_base(),
     )
     return fig
 
 
 def grafico_heatmap(datos: pd.DataFrame):
     """Heatmap Regional × Estado con pendientes, total y avance."""
+    t = tema_actual()
     if "Regional" not in datos.columns or "_est_crono" not in datos.columns:
         return None
     d = datos.copy()
@@ -965,24 +1287,28 @@ def grafico_heatmap(datos: pd.DataFrame):
     fig = go.Figure(go.Heatmap(
         z=pend.values, x=cols, y=list(pend.index),
         text=[[f"{int(v)}" for v in fila] for fila in pend.values],
-        texttemplate="%{text}", textfont=dict(size=11),
-        customdata=custom, colorscale="Reds", colorbar=dict(title="Pendientes"),
+        texttemplate="%{text}", textfont=dict(size=11, color=t["ink"]),
+        customdata=custom, colorscale=t["heat"], xgap=3, ygap=3,
+        colorbar=dict(title=dict(text="Pendientes", font=dict(color=t["ink"])),
+                      tickfont=dict(color=t["muted"])),
         hovertemplate="<b>%{y}</b> · %{x}<br>Pendientes: %{z}<br>"
                       "Total: %{customdata[0]}<br>Avance MT3: %{customdata[1]}<extra></extra>",
     ))
     fig.update_layout(
         title=dict(text="<b>Mapa de calor: pendientes por Regional y Estado</b>",
-                   font=dict(size=15), x=0.02),
+                   font=dict(size=15, color=t["ink"]), x=0.02),
         height=max(320, 42 * len(pend.index) + 120),
         margin=dict(l=10, r=10, t=55, b=10),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(title=""), yaxis=dict(title="", autorange="reversed"),
+        xaxis=dict(title="", color=t["muted"]),
+        yaxis=dict(title="", autorange="reversed", color=t["muted"]),
+        **plotly_base(),
     )
     return fig
 
 
 def grafico_top_pendientes(datos: pd.DataFrame, top_n: int = 12):
     """Ranking horizontal de sedes con más pendientes (evita amontonamiento)."""
+    t = tema_actual()
     tmp = datos.assign(
         _lbl=datos["_SBAN"] + " · " + datos["Oficina"].str.slice(0, 30),
         _full=datos["_SBAN"] + " - " + datos["Oficina"])
@@ -996,29 +1322,29 @@ def grafico_top_pendientes(datos: pd.DataFrame, top_n: int = 12):
     fig = go.Figure()
     fig.add_bar(
         y=ag["_lbl"], x=ag["Realizados"], orientation="h", name="✅ Subsanados (MT)",
-        marker=dict(color="#2E9E5B", line=dict(width=0)),
+        marker=dict(color=t["verde"], line=dict(width=0), cornerradius=4),
         customdata=ag["_full"],
         hovertemplate="<b>%{customdata}</b><br>Subsanados: %{x:,}<extra></extra>")
     fig.add_bar(
         y=ag["_lbl"], x=ag["Pendientes"], orientation="h", name="⚠️ Pendientes",
-        marker=dict(color="#D64541", line=dict(width=0)),
-        text=ag["Pendientes"], textposition="outside", textfont=dict(size=10),
+        marker=dict(color=t["pend"], line=dict(width=0), cornerradius=4),
+        text=ag["Pendientes"], textposition="outside", textfont=dict(size=10, color=t["muted"]),
         cliponaxis=False, customdata=ag["_full"],
         hovertemplate="<b>%{customdata}</b><br>Pendientes: %{x:,}<extra></extra>")
     alto = max(340, 30 * len(ag) + 120)
     fig.update_layout(
         title=dict(text=f"<b>Top {len(ag)} sedes con más pendientes de MT3</b>"
-                        f"<br><span style='font-size:11px'>{total_pend:,} pendientes "
+                        f"<br><span style='font-size:11px;color:{t['muted']}'>{total_pend:,} pendientes "
                         f"en este ranking</span>".replace(",", "."),
-                   font=dict(size=15), x=0.02),
-        barmode="stack", bargap=0.35,
+                   font=dict(size=15, color=t["ink"]), x=0.02),
+        barmode="stack", bargap=0.35, barcornerradius=5,
         height=alto,
         margin=dict(l=10, r=40, t=60, b=10),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(title="Equipos", gridcolor="rgba(128,128,128,.25)",
+        xaxis=dict(title="Equipos", gridcolor=t["grid"],
                    zeroline=False, automargin=True),
-        yaxis=dict(title="", tickfont=dict(size=11), automargin=True),
-        legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0),
+        yaxis=dict(title="", tickfont=dict(size=11, color=t["ink"]), automargin=True),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0, font=dict(color=t["muted"])),
+        **plotly_base(),
     )
     return fig
 
@@ -1359,27 +1685,29 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
                     format="%.1f%%", min_value=0, max_value=100),
                 "Categoría Novedad": st.column_config.TextColumn("Categoría novedad", width="medium"),
                 "Novedades del día": st.column_config.NumberColumn(
-                    "Novedades del día", format="%d", width="small"),
+                    "Nov. del día", format="%d", width="medium",
+                    help="Novedades registradas en la fecha de corte (hoy)"),
                 "Novedades acumuladas": st.column_config.NumberColumn(
-                    "Novedades acum.", format="%d", width="small"),
+                    "Nov. acumuladas", format="%d", width="medium",
+                    help="Novedades acumuladas desde el inicio del registro"),
                 "Obs. novedad": st.column_config.TextColumn("Obs. novedad", width="large"),
             },
         )
         m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("Oficinas", f"{n_vis:,}".replace(",", "."))
-        m2.metric("Total elementos", f"{vt:,}".replace(",", "."))
-        m3.metric("Subsanados", f"{vs:,}".replace(",", "."))
-        m4.metric("Pendientes", f"{vp:,}".replace(",", "."))
+        m1.metric("Oficinas", f"{n_vis:,}".replace(",", "."), border=True)
+        m2.metric("Total elementos", f"{vt:,}".replace(",", "."), border=True)
+        m3.metric("Subsanados", f"{vs:,}".replace(",", "."), border=True)
+        m4.metric("Pendientes", f"{vp:,}".replace(",", "."), border=True)
         m5.metric("Avance", f"{va:.1f}%".replace(".", ","),
                   delta=f"{vp:,} pendientes".replace(",", "."),
-                  delta_color="inverse")
+                  delta_color="inverse", border=True)
         if "Novedades del día" in vis.columns:
             sedes_nov = int((pd.to_numeric(vis.loc[:n_vis - 1, "Novedades del día"],
                                            errors="coerce").fillna(0) > 0).sum())
             n1, n2, n3 = st.columns(3)
-            n1.metric("🏷️ Novedades del día", f"{nd:,}".replace(",", "."))
-            n2.metric("🏢 Sedes con novedad hoy", f"{sedes_nov:,}".replace(",", "."))
-            n3.metric("📚 Novedades acumuladas", f"{na:,}".replace(",", "."))
+            n1.metric("🏷️ Novedades del día", f"{nd:,}".replace(",", "."), border=True)
+            n2.metric("🏢 Sedes con novedad hoy", f"{sedes_nov:,}".replace(",", "."), border=True)
+            n3.metric("📚 Novedades acumuladas", f"{na:,}".replace(",", "."), border=True)
         st.download_button(
             "⬇️ Descargar Excel (vista filtrada + gráficos + novedades)",
             data=generar_excel_resumen(vis),
@@ -1502,6 +1830,8 @@ def np_where(cond: pd.Series, si: str, no: str) -> pd.Series:
 # Main
 # ----------------------------------------------------------------------------
 def main():
+    aplicar_css()
+    barra_tema()
     try:
         df = cargar_datos()
     except FileNotFoundError as exc:
@@ -1539,6 +1869,10 @@ def main():
     df["_est_crono"] = df["SBAN"].map(_estado_sban).fillna("Sin cronograma")
 
     df["_componente"] = clasificar_componente(df)
+
+    # Regla de negocio opcional: impresoras láser (C2) tratadas como facturables
+    if IMPRESORAS_FACTURABLES:
+        df.loc[df["_componente"].eq("C2"), "Facturable"] = "Si"
 
     # --- Selector de módulo (se elige antes que los filtros) ---
     opciones_mod = ["Componente 1", "Componente 2 (Impresoras láser)", "UPS"]
@@ -1627,29 +1961,10 @@ def main():
                        "Revisa el filtro de Oficina o la atribución.")
         st.stop()
 
-    # --- Título / KPIs ---
-    st.title("🛠️ Control Mantenimiento Preventivo 3")
+    # --- Encabezado hero + KPIs ---
     scope = "Todas las oficinas" if not seleccion else f"{len(seleccion)} oficina(s)"
     atrib = {"T": "Todos", "Si": "BANCO (Facturable Si)", "No": "COLSOF (No facturable)"}[f_attr]
-    st.markdown(
-        f":blue-badge[**Módulo: {modulo}**] "
-        f":green-badge[🟢 Operativo] "
-        f":gray-badge[🕒 Última actualización: {leer_ultima_actualizacion()}]"
-    )
-    st.caption(
-        f"Vista: **{scope}** · Atribución: **{atrib}** · "
-        f"{len(filtrado):,} equipos".replace(",", ".")
-    )
-    st.caption(
-        f"Totales base: Componente 1 = {conteos.get('C1', 0):,} · "
-        f"Componente 2 (láser) = {conteos.get('C2', 0):,} · UPS = {conteos.get('UPS', 0):,}".replace(",", ".")
-        + (f" · Novedades del día: **{int(nov_resumen['Novedades del día'].sum())}** "
-           f"(corte {fecha_corte:%Y-%m-%d})"
-           if (nov_resumen is not None and not nov_resumen.empty
-               and 'Novedades del día' in nov_resumen.columns and pd.notna(fecha_corte))
-           else " · Novedades: sin datos")
-    )
-    banner_publico()
+    encabezado_hero(modulo, scope, atrib, len(filtrado), conteos, nov_resumen, fecha_corte)
 
     # --- Validación de integridad de los archivos en uso ---
     p_crono_val = ruta_crono_act()
@@ -1676,65 +1991,67 @@ def main():
     st.progress(min(max(avance_filtro / 100.0, 0.0), 1.0),
                 text=f"Avance MT3 del filtro actual: {avance_filtro:.1f}%".replace(".", ","))
 
-    # --- Gráficas ---
+    # --- Filtros activos (chips con X) ---
+    barra_filtros_activos(seleccion, solo_pendientes, f_attr,
+                          st.session_state.get("click_sban"))
+
+    # --- Pestañas: Gráficos · Resumen por oficina · Gestión de novedades ---
     cfg_chart = {"displaylogo": False,
                  "modeBarButtonsToRemove": ["lasso2d", "select2d"]}
     cfg_sel = {"displaylogo": False,
                "modeBarButtonsToRemove": ["lasso2d", "select2d", "zoom2d", "pan2d"]}
 
-    click = st.session_state.get("click_sban")
-    if click:
-        cc1, cc2 = st.columns([4, 1])
-        cc1.info(f"🎯 Filtro activo por clic en el ranking: **SBAN {click}**")
-        if cc2.button("✖ Quitar filtro", key="quitar_click"):
-            st.session_state.pop("click_sban", None)
-            st.rerun()
+    tab_graf, tab_res, tab_nov = st.tabs(
+        ["📈 Gráficos y avance", "🏢 Resumen por oficina", "📋 Gestión de novedades"])
 
-    fila1a, fila1b = st.columns([1, 1])
-    with fila1a:
-        st.plotly_chart(
-            grafico_dona(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
-            width="stretch", config=cfg_chart)
-    with fila1b:
-        st.plotly_chart(
-            grafico_gauge(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
-            width="stretch", config=cfg_chart)
+    with tab_graf:
+        fila1a, fila1b = st.columns([1, 1])
+        with fila1a:
+            st.plotly_chart(
+                grafico_dona(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
+                width="stretch", config=cfg_chart)
+        with fila1b:
+            st.plotly_chart(
+                grafico_gauge(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
+                width="stretch", config=cfg_chart)
 
-    fila2a, fila2b = st.columns([1.4, 1])
-    with fila2a:
-        top_n = st.select_slider("Sedes a mostrar en el ranking",
-                                 options=[5, 10, 12, 15, 20, 25], value=12,
-                                 key="top_n_pend")
-        sel = st.plotly_chart(
-            grafico_top_pendientes(filtrado, top_n=top_n), width="stretch",
-            config=cfg_sel, key="chart_top", on_select="rerun", selection_mode="points")
-        try:
-            pts = sel.selection.points if (sel is not None and getattr(sel, "selection", None)) else []
-        except Exception:  # noqa: BLE001
-            pts = []
-        if pts:
-            etiqueta = str(pts[0].get("y") or pts[0].get("x") or "")
-            candidato = etiqueta[:5]
-            if candidato.isdigit() and st.session_state.get("click_sban") != candidato:
-                st.session_state["click_sban"] = candidato
-                st.rerun()
-        st.caption("💡 Haz clic en una barra para filtrar el panel por esa sede.")
-    with fila2b:
-        fig_t = grafico_tendencia(filtrado)
-        if fig_t is not None:
-            st.plotly_chart(fig_t, width="stretch", config=cfg_chart)
-        else:
-            st.info("Sin fechas de MT3 para la selección actual.")
+        fila2a, fila2b = st.columns([1.4, 1])
+        with fila2a:
+            top_n = st.segmented_control("Sedes a mostrar en el ranking",
+                                         options=[5, 10, 12, 15, 20, 25], default=12,
+                                         key="top_n_pend") or 12
+            sel = st.plotly_chart(
+                grafico_top_pendientes(filtrado, top_n=top_n), width="stretch",
+                config=cfg_sel, key="chart_top", on_select="rerun", selection_mode="points")
+            try:
+                pts = sel.selection.points if (sel is not None and getattr(sel, "selection", None)) else []
+            except Exception:  # noqa: BLE001
+                pts = []
+            if pts:
+                etiqueta = str(pts[0].get("y") or pts[0].get("x") or "")
+                candidato = etiqueta[:5]
+                if candidato.isdigit() and st.session_state.get("click_sban") != candidato:
+                    st.session_state["click_sban"] = candidato
+                    st.rerun()
+            st.caption("💡 Haz clic en una barra para filtrar el panel por esa sede.")
+        with fila2b:
+            fig_t = grafico_tendencia(filtrado)
+            if fig_t is not None:
+                st.plotly_chart(fig_t, width="stretch", config=cfg_chart)
+            else:
+                st.info("Sin fechas de MT3 para la selección actual.")
 
-    fig_h = grafico_heatmap(filtrado)
-    if fig_h is not None:
-        st.plotly_chart(fig_h, width="stretch", config=cfg_chart)
+        fig_h = grafico_heatmap(filtrado)
+        if fig_h is not None:
+            st.plotly_chart(fig_h, width="stretch", config=cfg_chart)
 
-    # --- Resumen por oficina (Total / Subsanados / Pendientes / % Avance / Novedades) ---
-    render_resumen(base_oficina, seleccion, f_attr, nov_resumen)
+    with tab_res:
+        # Resumen por oficina (Total / Subsanados / Pendientes / % Avance / Novedades)
+        render_resumen(base_oficina, seleccion, f_attr, nov_resumen)
 
-    # --- Tabla de gestión ---
-    render_tabla(filtrado, seleccion, solo_pendientes)
+    with tab_nov:
+        # Tabla de gestión de novedades
+        render_tabla(filtrado, seleccion, solo_pendientes)
 
     st.markdown("---")
     st.caption(f"Mantenimiento Preventivo 3 · Módulo {modulo} · 1 fila = 1 elemento (Serial único).")

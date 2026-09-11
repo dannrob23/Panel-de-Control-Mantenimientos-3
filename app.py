@@ -255,6 +255,11 @@ def encabezado_hero(modulo: str, scope: str, atrib: str, n_equipos: int,
                    if (_dias is not None and _dias >= 3) else "")
     _chip_regla = (chip("ℹ️ Impresoras: facturables (Si)", "aviso")
                    if IMPRESORAS_FACTURABLES else "")
+    _chip_fact = ""
+    if str(atrib).startswith("BANCO"):
+        _chip_fact = chip("🏦 Viendo: Solo facturables", "prim")
+    elif str(atrib).startswith("COLSOF"):
+        _chip_fact = chip("🏢 Viendo: Solo no facturables", "prim")
 
     st.markdown(
         f'<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;'
@@ -270,6 +275,7 @@ def encabezado_hero(modulo: str, scope: str, atrib: str, n_equipos: int,
         f'    {chip("📦 " + modulo, "prim")}{chip("Operativo", "ok")}'
         f'    {chip("🕒 " + str(leer_ultima_actualizacion()))}'
         + _chip_regla
+        + _chip_fact
         + _chip_viejo
         + (chip("🔒 Modo público", "aviso") if MODO_PUBLICO else "")
         + f'  </div>'
@@ -280,6 +286,48 @@ def encabezado_hero(modulo: str, scope: str, atrib: str, n_equipos: int,
         f'{nov_txt}</div>'.replace(",", "."),
         unsafe_allow_html=True,
     )
+
+
+def f_attr_seleccionado() -> str:
+    """Traduce la selección del selector VISIBLE de facturación a 'T' / 'Si' / 'No'."""
+    sel = st.session_state.get("seg_fact") or ""
+    if "Facturables (BANCO)" in sel:
+        return "Si"
+    if "No facturables" in sel:
+        return "No"
+    return "T"
+
+
+def barra_facturacion(df_mod: pd.DataFrame):
+    """Barra VISIBLE de facturación (Opción 1 de usabilidad).
+
+    Píldoras siempre a la vista en el área principal (no escondidas en el sidebar),
+    con la opción activa resaltada y los conteos debajo. En módulos de una sola
+    categoría se informa con una etiqueta en lugar de ofrecer opciones inútiles.
+    """
+    if df_mod is None or getattr(df_mod, "empty", True) or "Facturable" not in df_mod.columns:
+        return
+    n_tot = int(len(df_mod))
+    n_si = int((df_mod["Facturable"] == "Si").sum())
+    n_no = int((df_mod["Facturable"] == "No").sum())
+
+    def fmt(n: int) -> str:
+        return f"{n:,}".replace(",", ".")
+
+    if n_si == 0 or n_no == 0:
+        st.session_state.pop("seg_fact", None)   # nunca deja la vista vacía
+        cual = "Facturable (BANCO)" if n_si else "No facturable (COLSOF)"
+        st.info(f"ℹ️ Este módulo es **100% {cual}** — {fmt(n_tot)} equipos. No requiere filtro.")
+        return
+
+    st.segmented_control(
+        "Facturación",
+        ["Todos", "🏦 Facturables (BANCO)", "🏢 No facturables (COLSOF)"],
+        default="Todos", key="seg_fact",
+        help="Filtra el tablero por atribución de facturación (columna 'Facturable').",
+    )
+    st.caption(f"📊 Del módulo ({fmt(n_tot)} equipos): 🏦 Facturables {fmt(n_si)} · "
+               f"🏢 No facturables {fmt(n_no)}")
 
 
 def barra_filtros_activos(seleccion, solo_pendientes, f_attr, click_sban):
@@ -1072,36 +1120,19 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
             help="Filtra la tabla y métricas a los equipos que aún no tienen consecutivo MT3.",
         )
 
-        # --- Filtro de facturación ADAPTATIVO al módulo (Opción A) ---
-        # Solo se ofrecen las opciones que EXISTEN en el módulo activo. Si el módulo es
-        # de una sola categoría, se informa con una etiqueta en lugar de un filtro inútil.
-        _tiene_si = bool((base_mod["Facturable"] == "Si").any()) if "Facturable" in base_mod else True
-        _tiene_no = bool((base_mod["Facturable"] == "No").any()) if "Facturable" in base_mod else True
+        # El filtro de facturación vive ahora en la BARRA VISIBLE del área principal
+        # (arriba, siempre a la vista). Aquí solo se sincroniza su valor.
         if "f_atrib" not in st.session_state:
             st.session_state["f_atrib"] = "Todos"
-        if _tiene_si and _tiene_no:
-            f_attr_label = st.radio(
-                "Distinguir por facturación (AN)",
-                options=["Todos", "BANCO (Facturable Si)", "COLSOF (No facturable)"],
-                key="f_atrib",
-                help="Según columna Facturable: Si = atribuible a BANCO · No = gestión COLSOF.",
-            )
-        else:
-            st.session_state["f_atrib"] = "Todos"   # nunca deja la vista vacía
-            f_attr_label = "Todos"
-            if _tiene_si:
-                st.info("ℹ️ Este módulo es **100% Facturable (BANCO)** — no requiere filtro.")
-            else:
-                st.info("ℹ️ Este módulo es **100% No facturable (COLSOF)** — no requiere filtro.")
-        f_attr = {"Todos": "T",
-                  "BANCO (Facturable Si)": "Si",
-                  "COLSOF (No facturable)": "No"}[f_attr_label]
+        f_attr = f_attr_seleccionado()
+        st.caption("💡 El filtro de **Facturación** está arriba, en la barra visible.")
 
         st.divider()
         if st.button("🧹 Limpiar todos los filtros", width="stretch", key="limpiar_filtros"):
             st.session_state["f_oficinas"] = []
             st.session_state["f_solo_pend"] = False
             st.session_state["f_atrib"] = "Todos"
+            st.session_state.pop("seg_fact", None)
             st.session_state.pop("click_sban", None)
             for _k in ("res_estado", "res_catnov"):
                 st.session_state.pop(_k, None)
@@ -1890,6 +1921,7 @@ def main():
     if st.session_state.get("_modulo_prev") != modulo:
         st.session_state["_modulo_prev"] = modulo
         st.session_state["f_atrib"] = "Todos"
+        st.session_state.pop("seg_fact", None)   # el selector de facturación se reinicia
         st.session_state["f_oficinas"] = []
         st.session_state["f_solo_pend"] = False
         # Filtros internos del cuadro "Resumen por oficina"
@@ -1965,6 +1997,9 @@ def main():
     scope = "Todas las oficinas" if not seleccion else f"{len(seleccion)} oficina(s)"
     atrib = {"T": "Todos", "Si": "BANCO (Facturable Si)", "No": "COLSOF (No facturable)"}[f_attr]
     encabezado_hero(modulo, scope, atrib, len(filtrado), conteos, nov_resumen, fecha_corte)
+
+    # --- Barra VISIBLE de facturación (Opción 1: filtro a la vista + conteos) ---
+    barra_facturacion(df_mod)
 
     # --- Validación de integridad de los archivos en uso ---
     p_crono_val = ruta_crono_act()

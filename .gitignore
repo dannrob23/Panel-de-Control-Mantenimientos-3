@@ -12,3 +12,6 @@ app_backup_componente1_*.py
 # Entorno virtual local (no subir dependencias)
 .venv/
 venv/
+
+# Configuración local con secretos (modo_admin, modo_publico) — NO subir
+.streamlit/secrets.toml

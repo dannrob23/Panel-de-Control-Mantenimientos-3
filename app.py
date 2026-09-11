@@ -43,6 +43,15 @@ except Exception:  # noqa: BLE001
 # 'No', así que el panel aplica esta regla y la anuncia con un chip en el encabezado.
 IMPRESORAS_FACTURABLES = True
 
+# Modo administrador: habilita la carga de datos (módulo "Ingesta diaria").
+# En la app PÚBLICA (Streamlit Cloud) NO se define este secreto → el público solo consulta.
+# Para activarlo en tu PC, crea `.streamlit/secrets.toml` con:   modo_admin = true
+# (ese archivo NO se sube al repositorio).
+try:
+    MODO_ADMIN = bool(st.secrets.get("modo_admin", False))
+except Exception:  # noqa: BLE001
+    MODO_ADMIN = False
+
 
 # ----------------------------------------------------------------------------
 # Tema visual: OSCURO premium (por defecto) y CLARO institucional
@@ -1067,31 +1076,40 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
             f'</div>',
             unsafe_allow_html=True,
         )
-        st.markdown("## 📂 Ingesta diaria")
-        st.caption("Sube los .xlsx del día: **Data**, **Campos dashboard** y/o **Cronograma**. "
-                   "El tipo se detecta solo y queda bitácora en `uploads\\bitacora_cargas.csv`.")
-        subidos = st.file_uploader(
-            "Archivos (.xlsx)", type=["xlsx"], accept_multiple_files=True, key="up_files",
-            help="Data (Hoja1) · Campos dashboard (Dashboard_KPI) · Cronograma (ESTADO).")
-        for archivo in subidos or []:
-            aplicar_subida(archivo)
+        # ─── INGESTA DIARIA: solo visible en MODO ADMINISTRADOR ───
+        # En la app pública (Cloud) no existe el secreto `modo_admin` → el público solo
+        # consulta; la carga de datos queda restringida al administrador.
+        if MODO_ADMIN:
+            st.markdown("## 📂 Ingesta diaria")
+            st.caption("Sube los .xlsx del día: **Data**, **Campos dashboard** y/o **Cronograma**. "
+                       "El tipo se detecta solo y queda bitácora en `uploads\\bitacora_cargas.csv`.")
+            subidos = st.file_uploader(
+                "Archivos (.xlsx)", type=["xlsx"], accept_multiple_files=True, key="up_files",
+                help="Data (Hoja1) · Campos dashboard (Dashboard_KPI) · Cronograma (ESTADO).")
+            for archivo in subidos or []:
+                aplicar_subida(archivo)
 
-        rutas = rutas_activas()
-        p_data, p_crono = Path(rutas["data"]), Path(rutas["crono"])
-        p_campos = rutas["campos"]
-        local = es_local(p_data) and es_local(p_crono)
-        fuentes = (f"Data: `{p_data.name}` · Cronograma: `{p_crono.name}` · "
-                   + (f"Campos: `{Path(p_campos).name}`" if p_campos else "Campos: —"))
-        st.caption(fuentes)
-        st.caption(f"🕒 Última actualización: **{leer_ultima_actualizacion()}**")
-        if not local:
-            st.info("Usando archivos subidos (carpeta `uploads`).")
-        if st.button("↩️ Volver a archivos locales",
-                     disabled=local, key="reset_files"):
-            for k in ("ruta_data", "ruta_crono", "ruta_crono_ups", "ruta_campos", "last_up"):
-                st.session_state.pop(k, None)
-            st.cache_data.clear()
-            st.rerun()
+            rutas = rutas_activas()
+            p_data, p_crono = Path(rutas["data"]), Path(rutas["crono"])
+            p_campos = rutas["campos"]
+            local = es_local(p_data) and es_local(p_crono)
+            fuentes = (f"Data: `{p_data.name}` · Cronograma: `{p_crono.name}` · "
+                       + (f"Campos: `{Path(p_campos).name}`" if p_campos else "Campos: —"))
+            st.caption(fuentes)
+            st.caption(f"🕒 Última actualización: **{leer_ultima_actualizacion()}**")
+            if not local:
+                st.info("Usando archivos subidos (carpeta `uploads`).")
+            if st.button("↩️ Volver a archivos locales",
+                         disabled=local, key="reset_files"):
+                for k in ("ruta_data", "ruta_crono", "ruta_crono_ups", "ruta_campos", "last_up"):
+                    st.session_state.pop(k, None)
+                st.cache_data.clear()
+                st.rerun()
+        else:
+            st.markdown("## 🔒 Datos")
+            st.caption(f"🕒 Última actualización: **{leer_ultima_actualizacion()}**")
+            st.caption("Panel de **consulta**. La carga y actualización de datos está "
+                       "restringida al administrador.")
 
         st.divider()
         st.markdown("## 🛠️ Filtros")

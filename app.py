@@ -1162,29 +1162,31 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
             st.cache_data.clear()
             st.rerun()
 
-        with st.expander("🗂️ Auditoría y fuentes", expanded=False):
-            rutas2 = rutas_activas()
-            p_data2, p_crono2 = Path(rutas2["data"]), Path(rutas2["crono"])
-            p_campos2, p_ups2 = rutas2["campos"], rutas2.get("crono_ups", "")
-            st.caption(
-                f"**Data en uso:** `{p_data2.name}`\n"
-                f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_data2)):%Y-%m-%d %H:%M}\n"
-                f"**Cronograma Equipos:** `{p_crono2.name}`\n"
-                f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_crono2)):%Y-%m-%d %H:%M}\n"
-                + (f"**Campos dashboard:** `{Path(p_campos2).name}`\n"
-                   f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_campos2)):%Y-%m-%d %H:%M}\n"
-                   if p_campos2 else "**Campos dashboard:** —\n")
-                + (f"**Cronograma UPS:** `{Path(p_ups2).name}`\n"
-                   f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_ups2)):%Y-%m-%d %H:%M}"
-                   if p_ups2 else "**Cronograma UPS:** —")
-            )
-            st.caption(f"🕒 Última actualización: **{leer_ultima_actualizacion()}**")
-            bitacora = DIR_CARGA / "bitacora_cargas.csv"
-            if bitacora.exists():
-                with open(bitacora, "rb") as fh:
-                    st.download_button("⬇️ Bitácora de cargas (CSV)", data=fh.read(),
-                                       file_name="bitacora_cargas.csv", mime="text/csv",
-                                       width="stretch")
+        # 🗂️ Auditoría y fuentes: información interna → solo en modo administrador
+        if MODO_ADMIN:
+            with st.expander("🗂️ Auditoría y fuentes", expanded=False):
+                rutas2 = rutas_activas()
+                p_data2, p_crono2 = Path(rutas2["data"]), Path(rutas2["crono"])
+                p_campos2, p_ups2 = rutas2["campos"], rutas2.get("crono_ups", "")
+                st.caption(
+                    f"**Data en uso:** `{p_data2.name}`\n"
+                    f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_data2)):%Y-%m-%d %H:%M}\n"
+                    f"**Cronograma Equipos:** `{p_crono2.name}`\n"
+                    f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_crono2)):%Y-%m-%d %H:%M}\n"
+                    + (f"**Campos dashboard:** `{Path(p_campos2).name}`\n"
+                       f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_campos2)):%Y-%m-%d %H:%M}\n"
+                       if p_campos2 else "**Campos dashboard:** —\n")
+                    + (f"**Cronograma UPS:** `{Path(p_ups2).name}`\n"
+                       f"· Modif.: {pd.Timestamp.fromtimestamp(os.path.getmtime(p_ups2)):%Y-%m-%d %H:%M}"
+                       if p_ups2 else "**Cronograma UPS:** —")
+                )
+                st.caption(f"🕒 Última actualización: **{leer_ultima_actualizacion()}**")
+                bitacora = DIR_CARGA / "bitacora_cargas.csv"
+                if bitacora.exists():
+                    with open(bitacora, "rb") as fh:
+                        st.download_button("⬇️ Bitácora de cargas (CSV)", data=fh.read(),
+                                           file_name="bitacora_cargas.csv", mime="text/csv",
+                                           width="stretch")
         return seleccion, solo_pendientes, f_attr
 
 

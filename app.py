@@ -1305,12 +1305,16 @@ def grafico_tendencia(datos: pd.DataFrame):
     serie = d.groupby(d["_f"].dt.date).size().sort_index()
     acum = serie.cumsum()
     x = [f"{f:%d/%m}" for f in serie.index]
+    cel = str(t["celeste"]).lstrip("#")
+    try:
+        rr, gg, bb = int(cel[0:2], 16), int(cel[2:4], 16), int(cel[4:6], 16)
+        relleno = f"rgba({rr},{gg},{bb},0.15)"
+    except (ValueError, IndexError):
+        relleno = "rgba(34,211,238,0.15)"
     fig = go.Figure()
     fig.add_scatter(x=x, y=serie.values, name="Por día", mode="lines+markers",
                     line=dict(color=t["celeste"], width=2.5), marker=dict(size=6),
-                    fill="tozeroy",
-                    fillgradient=dict(type="vertical",
-                                      colorscale=[[0, t["celeste"] + "00"], [1, t["celeste"] + "66"]]),
+                    fill="tozeroy", fillcolor=relleno,
                     hovertemplate="%{x}<br>MT3 del día: %{y}<extra></extra>")
     fig.add_scatter(x=x, y=acum.values, name="Acumulado", mode="lines",
                     line=dict(color=t["verde"], width=2, dash="dot"), yaxis="y2",

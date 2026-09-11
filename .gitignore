@@ -8,3 +8,7 @@ app_backup_componente1_*.py
 # Respaldos y artefactos que no se despliegan
 *.tmp
 ~$*
+
+# Entorno virtual local (no subir dependencias)
+.venv/
+venv/

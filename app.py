@@ -789,36 +789,34 @@ def _pad5(v):
 
 
 def _col(df, *nombres):
-    """Busca una columna tolerando espacios y mayúsculas/minúsculas."""
-    mapa = {str(c).strip().lower(): c for c in df.columns}
+    """Busca una columna tolerando espacios (dobles/sobrantes) y mayúsculas."""
+    def norm(x):
+        return " ".join(str(x).strip().lower().split())
+    mapa = {norm(c): c for c in df.columns}
     for nom in nombres:
         if nom in df.columns:
             return nom
-        clave = str(nom).strip().lower()
+        clave = norm(nom)
         if clave in mapa:
             return mapa[clave]
     return None
 
 
 def preparar_campos(kpi, nov, df=None):
-    """Normaliza Dashboard_KPI y Novedades Equipos por SBAN (5 dígitos).
+    """Normaliza Dashboard_KPI (estado/observaciones) y Novedades Equipos (por SBAN).
 
-    Asigna `_comp` (C1/C2/UPS) para que las novedades no se trasladen entre módulos:
-    - Con Serial: componente del elemento según la Data.
-    - Sin Serial: C1 por defecto, salvo que el texto mencione UPS o impresora/láser.
+    Las novedades ahora viven en la hoja 'Novedades Equipos' e incluyen su propia
+    columna 'Categoria Novedad' (ya no viene en Dashboard_KPI).
+    Amarre por SBAN (5 dígitos) con respaldo en SBAN PCT.
+    Asigna `_comp` (C1/C2/UPS) para que las novedades no se trasladen entre módulos.
     """
-    k = pd.DataFrame(columns=["_SBAN", "Categoría Novedad", "Estado sede", "Obs. novedad"])
+    k = pd.DataFrame(columns=["_SBAN", "Estado sede", "Obs. novedad"])
     if kpi is not None and not kpi.empty:
-        cat = _col(kpi, "Categoria Novedad", "Categoría Novedad")
         est = _col(kpi, "Estado de la sede")
         obs = _col(kpi, "Observaciones actas PCT")
-        if cat is None:
-            cat = next((c for c in kpi.columns if "ategoria" in str(c) and "ovedad" in str(c)), None)
         sban = kpi[_col(kpi, "SBAN")] if _col(kpi, "SBAN") else pd.Series(dtype=str)
         k = pd.DataFrame({
             "_SBAN": sban.apply(_pad5),
-            "Categoría Novedad": (kpi[cat].fillna("").astype(str).str.strip()
-                                  if cat else pd.Series([""] * len(kpi))),
             "Estado sede": (kpi[est].fillna("").astype(str).str.strip()
                             if est else pd.Series([""] * len(kpi))),
             "Obs. novedad": (kpi[obs].fillna("").astype(str).str.strip()
@@ -830,12 +828,31 @@ def preparar_campos(kpi, nov, df=None):
     n = pd.DataFrame()
     if nov is not None and not nov.empty:
         n = nov.copy()
-        c_sban = _col(n, "SBAN PCT", "SBAN")
-        n["_SBAN"] = n[c_sban].apply(_pad5) if c_sban else ""
-        n["_FECHA"] = pd.to_datetime(n[_col(n, "Fecha")], errors="coerce") if _col(n, "Fecha") else pd.NaT
+        c_sban = _col(n, "SBAN")
+        c_pct = _col(n, "SBAN PCT")
+        base = (n[c_sban].astype(str) if c_sban else pd.Series([""] * len(n), index=n.index))
+        alt = (n[c_pct].astype(str) if c_pct else pd.Series([""] * len(n), index=n.index))
+        # SBAN es la llave principal; SBAN PCT solo si SBAN viene vacío
+        llave = base.where(base.str.strip().replace("nan", "").ne(""), alt)
+        n["_SBAN"] = llave.apply(_pad5)
+        c_fecha = _col(n, "Fecha")
+        n["_FECHA"] = pd.to_datetime(n[c_fecha], errors="coerce") if c_fecha else pd.NaT
         c_serial = _col(n, "Serial")
         n["_Serial"] = n[c_serial].astype(str).str.strip() if c_serial else ""
+        c_cat = _col(n, "Categoria Novedad", "Categoría Novedad")
+        n["Categoría Novedad"] = (n[c_cat].fillna("").astype(str).str.strip()
+                                  if c_cat else "")
+        c_obs = _col(n, "Observaciones")
+        n["_Obs"] = n[c_obs].astype(str).str.strip() if c_obs else ""
+
         n = n[n["_SBAN"].astype(str).str.len() > 0]
+        # Descartar filas vacías (sin categoría, fecha, serial ni observación)
+        tiene_dato = (n["Categoría Novedad"].str.strip().ne("")
+                      | n["_FECHA"].notna()
+                      | n["_Serial"].str.strip().replace("nan", "").ne("")
+                      | n["_Obs"].str.strip().replace("nan", "").ne(""))
+        n = n[tiene_dato]
+
         tiene_serial = n["_Serial"].notna() & ~n["_Serial"].str.lower().isin(["", "nan"])
         clave = (n["_SBAN"].astype(str) + "|" + n["_Serial"].astype(str) + "|"
                  + n["_FECHA"].astype(str))
@@ -878,32 +895,64 @@ def preparar_campos(kpi, nov, df=None):
 
 
 def resumen_novedades(k, n):
-    """Contador por SBAN: categoría novedad, del día y acumulado (dedupe por Serial+Fecha)."""
+    """Contador por SBAN: categoría (última novedad), del día y acumulado."""
     if n is None or n.empty:
-        base = (k[["_SBAN", "Categoría Novedad", "Obs. novedad", "Estado sede"]].copy()
-                if k is not None and not k.empty else pd.DataFrame(columns=["_SBAN"]))
+        base = (k.copy() if (k is not None and not k.empty)
+                else pd.DataFrame(columns=["_SBAN", "Estado sede", "Obs. novedad"]))
+        if "Categoría Novedad" not in base.columns:
+            base["Categoría Novedad"] = ""
+        if "Obs. novedad" not in base.columns:
+            base["Obs. novedad"] = ""
         base["Novedades del día"] = 0
         base["Novedades acumuladas"] = 0
         base["Última novedad"] = pd.NaT
         base["Fecha de corte"] = pd.NaT
         return base
+
     corte = n["_FECHA"].max()
     acum = n.groupby("_SBAN").size().rename("Novedades acumuladas")
     dia = n[n["_FECHA"].eq(corte)].groupby("_SBAN").size().rename("Novedades del día")
     ult = n.groupby("_SBAN")["_FECHA"].max().rename("Última novedad")
-    res = pd.concat([acum, dia, ult], axis=1).reset_index()
-    res["Novedades del día"] = res["Novedades del día"].fillna(0).astype(int)
-    res["Novedades acumuladas"] = res["Novedades acumuladas"].fillna(0).astype(int)
-    res["Fecha de corte"] = corte
+
+    orden = n.sort_values("_FECHA", na_position="first")
+    if "Categoría Novedad" in n.columns:
+        cc = orden[orden["Categoría Novedad"].astype(str).str.strip().ne("")]
+        cat = cc.groupby("_SBAN")["Categoría Novedad"].last().rename("_cat_det")
+    else:
+        cat = pd.Series(dtype=str)
+    if "Obs. novedad detalle" in n.columns:
+        oo = orden[orden["Obs. novedad detalle"].astype(str).str.strip()
+                   .replace("nan", "").ne("")]
+        obs = oo.groupby("_SBAN")["Obs. novedad detalle"].last().rename("_obs_det")
+    else:
+        obs = pd.Series(dtype=str)
+
+    res = pd.concat([s for s in (acum, dia, ult, cat, obs)
+                     if isinstance(s, pd.Series) and len(s) > 0], axis=1)
+    res.index.name = "_SBAN"
+    res = res.reset_index()
     if k is not None and not k.empty:
         res = res.merge(k, on="_SBAN", how="outer")
-        res["Categoría Novedad"] = res["Categoría Novedad"].fillna("")
-        res["Obs. novedad"] = res["Obs. novedad"].fillna("")
-        res["Estado sede"] = res["Estado sede"].fillna("")
+
+    base_obs = res["Obs. novedad"].fillna("") if "Obs. novedad" in res.columns else ""
+    det = res["_obs_det"].fillna("") if "_obs_det" in res.columns else ""
+    res["Categoría Novedad"] = (res["_cat_det"].fillna("")
+                                if "_cat_det" in res.columns else "")
+    if isinstance(det, pd.Series):
+        res["Obs. novedad"] = det.where(det.astype(str).str.strip().ne(""), base_obs)
+    elif "Obs. novedad" not in res.columns:
+        res["Obs. novedad"] = ""
+    for c in ("Categoría Novedad", "Obs. novedad", "Estado sede"):
+        if c not in res.columns:
+            res[c] = ""
+        res[c] = res[c].fillna("")
+    res = res.drop(columns=[c for c in ("_cat_det", "_obs_det") if c in res.columns])
+
     res["Novedades del día"] = (pd.to_numeric(res["Novedades del día"], errors="coerce")
                                 .fillna(0).astype(int))
     res["Novedades acumuladas"] = (pd.to_numeric(res["Novedades acumuladas"], errors="coerce")
                                    .fillna(0).astype(int))
+    res["Fecha de corte"] = corte
     return res
 
 
@@ -1002,38 +1051,51 @@ def validar_integridad(d: pd.DataFrame, c: pd.DataFrame, kpi=None, nov=None, cup
             avisos.append(f"⚠️ {len(sob)} oficina(s) programadas sin elementos en Data "
                           f"(revisar si el cronograma incluye equipos no cargados).")
 
-    # --- Campos dashboard / Novedades ---
+    # --- Campos dashboard (estado de sede) y Novedades Equipos (hoja propia) ---
     if kpi is None or getattr(kpi, "empty", True):
-        avisos.append("⚠️ Campos dashboard no disponible: no se integran Categoría Novedad "
-                      "ni el contador diario de novedades.")
+        avisos.append("⚠️ Campos dashboard no disponible: no se integra el estado de la sede.")
+    if nov is None or getattr(nov, "empty", True):
+        avisos.append("⚠️ Novedades Equipos no disponible: no se integran las novedades.")
     else:
-        cat = next((x for x in kpi.columns if "ategoria" in str(x) and "ovedad" in str(x)), None)
-        if cat is None:
-            avisos.append("⚠️ Campos dashboard: no se encontró la columna 'Categoria Novedad'.")
-        else:
-            vals = set(kpi[cat].dropna().astype(str).str.strip())
-            vals.discard("")
-            raros = sorted(vals - {"DENUNCIA", "UBICACION ERRADA", "ADICIONAL", "Ninguna novedad"})
-            if raros:
-                avisos.append(f"⚠️ Categoria Novedad con valores no esperados: {raros[:6]}.")
-    if nov is not None and not getattr(nov, "empty", True):
-        faltan_n = {"Fecha"} - set(nov.columns)
-        if _col(nov, "SBAN PCT", "SBAN") is None:
-            faltan_n.add("SBAN PCT/SBAN")
+        faltan_n = set()
+        if _col(nov, "Fecha") is None:
+            faltan_n.add("Fecha")
+        if _col(nov, "SBAN") is None and _col(nov, "SBAN PCT") is None:
+            faltan_n.add("SBAN/SBAN PCT")
         if _col(nov, "Serial") is None:
             faltan_n.add("Serial")
+        if _col(nov, "Categoria Novedad") is None:
+            faltan_n.add("Categoria Novedad")
         if faltan_n:
             avisos.append("⚠️ Novedades Equipos: faltan columnas " + ", ".join(sorted(faltan_n)) + ".")
         else:
-            col_sb = _col(nov, "SBAN PCT", "SBAN")
-            sb = nov[col_sb] if col_sb else pd.Series(dtype=str)
-            sb = {_pad5(v) for v in sb.dropna()}
+            c_cat = _col(nov, "Categoria Novedad")
+            c_fec = _col(nov, "Fecha")
+            c_ser = _col(nov, "Serial")
+            c_obs = _col(nov, "Observaciones")
+            c_sb = _col(nov, "SBAN") or _col(nov, "SBAN PCT")
+            con_datos = (nov[c_cat].astype(str).str.strip().replace("nan", "").ne("")
+                         | pd.to_datetime(nov[c_fec], errors="coerce").notna()
+                         | nov[c_ser].astype(str).str.strip().replace("nan", "").ne("")
+                         | (nov[c_obs].astype(str).str.strip().replace("nan", "").ne("")
+                            if c_obs else False))
+            n_datos = int(con_datos.sum())
+            vals = set(nov[c_cat].dropna().astype(str).str.strip())
+            vals.discard("")
+            conocidos = {"DENUNCIO", "DENUNCIA", "RECOLECCION", "CAMBIO DE ESTADO A FACTURABLE",
+                         "OPERACION", "UBICACION ERRADA", "ADICIONAL"}
+            raros = sorted(vals - conocidos)
+            if raros:
+                avisos.append(f"⚠️ Categorías de novedad nuevas/no esperadas: {raros[:6]}.")
+            sb = {_pad5(v) for v in nov[c_sb].dropna()}
             sb.discard("")
             en_data = {_pad5(x) for x in pd.to_numeric(d["SBAN"], errors="coerce").dropna().unique()}
             fuera = sorted(sb - en_data)
             if fuera:
                 avisos.append(f"⚠️ Novedades Equipos: {len(fuera)} SBAN sin registro en la Data "
                               f"(ej. {fuera[:5]}).")
+            avisos.append(f"ℹ️ Novedades Equipos: {n_datos} fila(s) con datos de {len(nov)} "
+                          f"(se ignoran {len(nov) - n_datos} vacías).")
 
     # --- Cronograma UPS ---
     if cup is None or getattr(cup, "empty", True):

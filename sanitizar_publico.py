@@ -74,8 +74,9 @@ def sanear_campos(path: Path):
     kpi = kpi[[c for c in kcols if c in kpi.columns]].copy()
     if "Categoria  Novedad" in kpi.columns:
         kpi["Categoria  Novedad"] = kpi["Categoria  Novedad"].fillna("").astype(str).str.strip()
-    ncols = {"SBAN PCT": "SBAN PCT", "Fecha": "Fecha", "Serial ": "Serial ",
-             "Estado": "Estado", "Facturable": "Facturable", "Nombre Oficina": "Nombre Oficina"}
+    ncols = {"SBAN": "SBAN", "SBAN PCT": "SBAN PCT", "Fecha": "Fecha",
+             "Serial ": "Serial ", "Estado": "Estado", "Facturable": "Facturable",
+             "Nombre Oficina": "Nombre Oficina", "Categoria  Novedad": "Categoria  Novedad"}
     nov = nov[[c for c in ncols if c in nov.columns]].copy()
     for c in list(nov.columns):
         if str(c).strip().lower() == "serial":

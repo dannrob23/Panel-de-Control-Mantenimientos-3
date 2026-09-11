@@ -1299,8 +1299,9 @@ def render_kpis(datos: pd.DataFrame):
     return total, realizados, pendientes, fact_si, fact_no
 
 
-def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str, click_sban=None):
-    """KPI de cobertura: oficinas con mantenimiento preventivo (≥1 MT3) por componente."""
+def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
+                         click_sban=None, kpi_campos=None):
+    """KPIs de oficinas: 100% MT3 por componente y Oficinas Finalizadas (Campos col N)."""
     b = df
     if seleccion:
         b = b[b["_ofi_key"].isin(seleccion)]
@@ -1309,29 +1310,60 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str, click_s
     if click_sban:
         b = b[b["_SBAN"].eq(click_sban)]
 
-    st.markdown("##### 🏢 Oficinas con mantenimiento preventivo (MT3)")
-    cols = st.columns(3)
-    for col, (cod, nombre) in zip(cols, [("C1", "Componente 1"),
-                                         ("C2", "Componente 2 (láser)"),
-                                         ("UPS", "UPS")]):
+    st.markdown("##### 🏢 Oficinas: mantenimiento completo por componente y finalizadas (Campos)")
+    cols = st.columns(4)
+    for col, (cod, nombre) in zip(cols[:3], [("C1", "Componente 1"),
+                                             ("C2", "Componente 2 (láser)"),
+                                             ("UPS", "UPS")]):
         sub = b[b["_componente"].eq(cod)] if "_componente" in b.columns else b.iloc[0:0]
         if sub.empty:
-            col.metric(nombre, "0 / 0", help="Sin datos con los filtros actuales", border=True)
+            col.metric(f"{nombre} · 100% MT3", "0 / 0",
+                       help="Sin datos con los filtros actuales", border=True)
             continue
         g = sub.groupby("_SBAN")["_mt"].agg(["size", "sum"])
         total = int(len(g))
         intervenidas = int((g["sum"] > 0).sum())
         completas = int((g["sum"] >= g["size"]).sum())
-        pct = (intervenidas / total * 100) if total else 0.0
+        pct = (completas / total * 100) if total else 0.0
         col.metric(
-            f"{nombre} · oficinas con MT3", f"{intervenidas} / {total}",
-            delta=f"{pct:.0f}% cobertura",
-            help=(f"Oficinas con al menos 1 equipo con MT3 (de {total} oficinas). "
-                  f"Oficinas 100% completas: {completas}."),
+            f"{nombre} · oficinas 100% MT3", f"{completas} / {total}",
+            delta=f"{pct:.0f}% completas",
+            help=(f"Oficinas donde TODOS los elementos del componente tienen MT3: {completas} de {total}. "
+                  f"Oficinas con al menos 1 MT3 (intervenidas): {intervenidas}."),
             border=True,
         )
-    st.caption("El contador principal es de **oficinas intervenidas** (≥1 MT3); el detalle de "
-               "oficinas 100% completas está en el tooltip. Respeta Oficina · Atribución · clic.")
+
+    with cols[3]:
+        if kpi_campos is not None and not getattr(kpi_campos, "empty", True):
+            c_est = _col(kpi_campos, "Estado de la sede")
+            c_sb = _col(kpi_campos, "SBAN")
+            kk = kpi_campos.copy()
+            if c_sb:
+                kk["_SBAN"] = kk[c_sb].apply(_pad5)
+                if seleccion:
+                    sbans = {str(s).split(" - ")[0] for s in seleccion}
+                    kk = kk[kk["_SBAN"].isin(sbans)]
+                if click_sban:
+                    kk = kk[kk["_SBAN"].eq(click_sban)]
+            vals = (kk[c_est].fillna("").astype(str).str.strip()
+                    if c_est else pd.Series([], dtype=str))
+            fin = int((vals == "Finalizada").sum())
+            tot = int(len(vals))
+            pct = (fin / tot * 100) if tot else 0.0
+            cols[3].metric(
+                "🏁 Oficinas finalizadas (Campos N)", f"{fin} / {tot}",
+                delta=f"{pct:.0f}% de las sedes",
+                help="Columna N ('Estado de la sede') de Campos dashboard. Cada fila es una sede; "
+                     "'Reprogramada_Finalizada' se contabiliza aparte.",
+                border=True,
+            )
+        else:
+            cols[3].metric("🏁 Oficinas finalizadas (Campos N)", "n/d",
+                           help="Campos dashboard no disponible", border=True)
+
+    st.caption("Componentes = oficinas (SBAN) con **100% de sus elementos en MT3**; el detalle de "
+               "intervenidas está en el tooltip. **Finalizadas** usa la columna N de Campos (no se "
+               "deriva del MT3). Respetan Oficina y el clic del ranking.")
 
 
 # ----------------------------------------------------------------------------
@@ -1719,6 +1751,8 @@ ESTADO_COLORES = {
 
 def _color_de_estado(valor):
     texto = str(valor)
+    if "Reprogramada_Finalizada" in texto:
+        return "E4DFEC", "3B2A63"
     for clave in ("Finalizada", "En proceso", "Reprogramada", "Programada"):
         if clave in texto:
             return ESTADO_COLORES[clave]
@@ -1728,6 +1762,8 @@ def _color_de_estado(valor):
 def _badge_estado(valor) -> str:
     """Estado como badge accesible (símbolo + texto), sin depender solo del color."""
     t = str(valor)
+    if "Reprogramada_Finalizada" in t or "Reprogramada / Finalizada" in t:
+        return "🟪 Reprogramada_Finalizada"
     if "Finalizada" in t:
         return "🟩 Finalizada"
     if "En proceso" in t:
@@ -2363,7 +2399,7 @@ def main():
                 st.warning(msg)
 
     render_kpis(filtrado)
-    render_kpis_oficinas(df, seleccion, f_attr, st.session_state.get("click_sban"))
+    render_kpis_oficinas(df, seleccion, f_attr, st.session_state.get("click_sban"), kpi_campos)
     avance_filtro = float(filtrado["_mt"].mean() * 100) if len(filtrado) else 0.0
     st.progress(min(max(avance_filtro / 100.0, 0.0), 1.0),
                 text=f"Avance MT3 del filtro actual: {avance_filtro:.1f}%".replace(".", ","))

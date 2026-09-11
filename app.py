@@ -823,7 +823,20 @@ def preparar_campos(kpi, nov, df=None):
                              if obs else pd.Series([""] * len(kpi))),
         })
         k = k[k["_SBAN"].astype(str).str.len() > 0]
-        k = k.drop_duplicates("_SBAN", keep="first")
+
+        # Un SBAN puede tener varias filas (Regional/Jefatura/sede): se agrupa con
+        # prioridad para no perder sedes marcadas Finalizada en una fila secundaria.
+        _prio = ["Finalizada", "Reprogramada_Finalizada", "En proceso", "Programada"]
+
+        def _prio_estado(serie):
+            vals = {str(x).strip() for x in serie if str(x).strip()}
+            for p in _prio:
+                if p in vals:
+                    return p
+            return sorted(vals)[0] if vals else ""
+
+        k = (k.groupby("_SBAN", as_index=False)
+              .agg({"Estado sede": _prio_estado, "Obs. novedad": "last"}))
 
     n = pd.DataFrame()
     if nov is not None and not nov.empty:
@@ -1950,17 +1963,21 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
                     str(nr.get("Obs. novedad", "") or "").strip(),
                 )
         filas = []
-        for key, sub in base.groupby("_ofi_key", sort=True):
+        for key, sub in base.groupby("_SBAN", sort=True):
             total = len(sub)
             subsanados = int(sub["_mt"].sum())
             pendientes = total - subsanados
             avance = (subsanados / total * 100) if total else 0.0
             estados = sorted({str(x) for x in sub["_est_crono"].dropna().tolist() if str(x).strip()})
             sban_ofi = str(sub["_SBAN"].iloc[0])
+            nombres_ofi = [str(x).strip() for x in dict.fromkeys(sub["Oficina"].dropna())
+                           if str(x).strip()]
+            etiqueta_ofi = (" / ".join(nombres_ofi[:2])
+                            + (" …" if len(nombres_ofi) > 2 else "")) or "SIN NOMBRE"
             cat_nov, n_dia, n_acum, obs_nov = nov_lookup.get(sban_ofi, ("", 0, 0, ""))
             filas.append({
                 "SBAN": sban_ofi,
-                "Oficina": sub["Oficina"].iloc[0],
+                "Oficina": etiqueta_ofi,
                 "Estado": _badge_estado(" / ".join(estados) if estados else "Sin cronograma"),
                 "Estado cronograma": " / ".join(estados) if estados else "Sin cronograma",
                 "Total elementos": total,
@@ -1976,8 +1993,12 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
         datos_resumen = res.copy()  # sin fila TOTAL
 
         # ---------------- Filtros intuitivos de la vista ----------------
-        estados_posibles = ["Programada", "En proceso", "Finalizada", "Reprogramada", "Sin cronograma"]
-        presentes = sorted({e for v in datos_resumen["Estado cronograma"] for e in estados_posibles if e in v})
+        estados_posibles = ["Programada", "En proceso", "Finalizada", "Reprogramada",
+                            "Reprogramada_Finalizada", "Sin cronograma"]
+        tokens = {tok.strip() for v in datos_resumen["Estado cronograma"]
+                  for tok in str(v).split("/") if tok.strip()}
+        presentes = ([e for e in estados_posibles if e in tokens]
+                     + [e for e in sorted(tokens) if e not in estados_posibles])
         f1, f2, f3 = st.columns([2.2, 1.6, 1])
         with f1:
             sel_est = st.multiselect("🗂️ Estado cronograma", options=presentes, default=presentes,
@@ -1993,7 +2014,8 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
         vis = datos_resumen.copy()
         vis["% Avance"] = pd.to_numeric(vis["% Avance"], errors="coerce").fillna(0)
         if sel_est:
-            vis = vis[vis["Estado cronograma"].apply(lambda e: any(s in e for s in sel_est))]
+            vis = vis[vis["Estado cronograma"].apply(
+                lambda e: any(t.strip() in sel_est for t in str(e).split("/")))]
         vis = vis[vis["% Avance"] >= min_av]
         if solo_pend:
             vis = vis[vis["% Avance"] < 100.0]
@@ -2007,8 +2029,8 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
                                not in ("nan", "sin novedad", "—")})
             with g1:
                 sel_cat = st.multiselect("🏷️ Categoría Novedad", options=cats_nov,
-                                         default=cats_nov, key="res_catnov",
-                                         placeholder="Todas las categorías")
+                                         default=[], key="res_catnov",
+                                         placeholder="Todas las categorías (sin filtrar)")
             with g2:
                 solo_nov = st.checkbox("Solo novedades del día", key="res_solo_nov")
             if sel_cat:
@@ -2243,14 +2265,20 @@ def main():
     fecha_corte = (nov_norm["_FECHA"].max() if (nov_norm is not None and not nov_norm.empty)
                    else None)
 
-    # Estado por SBAN: prioriza la fuente diaria (Dashboard_KPI, col N) y usa el
-    # cronograma como respaldo.
-    estados_sede = {}
+    # Estado por SBAN: prioriza la fuente diaria (Dashboard_KPI, col N).
+    # Un SBAN puede tener varias filas (Regional/Jefatura/sede); si CUALQUIERA dice
+    # 'Finalizada', la sede se considera finalizada (evita perder jefaturas 01600/06900).
+    estados_por_sban = {}
     if kpi_norm is not None and not kpi_norm.empty and "Estado sede" in kpi_norm.columns:
         for _, fila_k in kpi_norm.iterrows():
             est = str(fila_k.get("Estado sede", "") or "").strip()
             if est:
-                estados_sede[str(fila_k["_SBAN"])] = est
+                estados_por_sban.setdefault(str(fila_k["_SBAN"]), set()).add(est)
+    prioridad = ["Finalizada", "Reprogramada_Finalizada", "En proceso", "Programada"]
+    estados_sede = {}
+    for sban_k, ests in estados_por_sban.items():
+        elegido = next((p for p in prioridad if p in ests), None)
+        estados_sede[sban_k] = elegido or sorted(ests)[0]
 
     def _estado_sban(v):
         if pd.isna(v):

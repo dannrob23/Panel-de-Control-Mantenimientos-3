@@ -1237,6 +1237,41 @@ def render_kpis(datos: pd.DataFrame):
     return total, realizados, pendientes, fact_si, fact_no
 
 
+def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str, click_sban=None):
+    """KPI de cobertura: oficinas con mantenimiento preventivo (≥1 MT3) por componente."""
+    b = df
+    if seleccion:
+        b = b[b["_ofi_key"].isin(seleccion)]
+    if f_attr != "T":
+        b = b[b["Facturable"] == f_attr]
+    if click_sban:
+        b = b[b["_SBAN"].eq(click_sban)]
+
+    st.markdown("##### 🏢 Oficinas con mantenimiento preventivo (MT3)")
+    cols = st.columns(3)
+    for col, (cod, nombre) in zip(cols, [("C1", "Componente 1"),
+                                         ("C2", "Componente 2 (láser)"),
+                                         ("UPS", "UPS")]):
+        sub = b[b["_componente"].eq(cod)] if "_componente" in b.columns else b.iloc[0:0]
+        if sub.empty:
+            col.metric(nombre, "0 / 0", help="Sin datos con los filtros actuales", border=True)
+            continue
+        g = sub.groupby("_SBAN")["_mt"].agg(["size", "sum"])
+        total = int(len(g))
+        intervenidas = int((g["sum"] > 0).sum())
+        completas = int((g["sum"] >= g["size"]).sum())
+        pct = (intervenidas / total * 100) if total else 0.0
+        col.metric(
+            f"{nombre} · oficinas con MT3", f"{intervenidas} / {total}",
+            delta=f"{pct:.0f}% cobertura",
+            help=(f"Oficinas con al menos 1 equipo con MT3 (de {total} oficinas). "
+                  f"Oficinas 100% completas: {completas}."),
+            border=True,
+        )
+    st.caption("El contador principal es de **oficinas intervenidas** (≥1 MT3); el detalle de "
+               "oficinas 100% completas está en el tooltip. Respeta Oficina · Atribución · clic.")
+
+
 # ----------------------------------------------------------------------------
 # Gráficas Plotly
 # ----------------------------------------------------------------------------
@@ -2095,6 +2130,7 @@ def main():
                 st.warning(msg)
 
     render_kpis(filtrado)
+    render_kpis_oficinas(df, seleccion, f_attr, st.session_state.get("click_sban"))
     avance_filtro = float(filtrado["_mt"].mean() * 100) if len(filtrado) else 0.0
     st.progress(min(max(avance_filtro / 100.0, 0.0), 1.0),
                 text=f"Avance MT3 del filtro actual: {avance_filtro:.1f}%".replace(".", ","))

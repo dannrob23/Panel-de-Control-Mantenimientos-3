@@ -1367,6 +1367,141 @@ def grafico_tendencia(datos: pd.DataFrame):
     return fig
 
 
+def grafico_mini_componentes(df: pd.DataFrame, seleccion: list, f_attr: str,
+                             click_sban=None):
+    """Barras de cobertura de oficinas con MT3 por componente (solo visual)."""
+    t = tema_actual()
+    b = df
+    if seleccion:
+        b = b[b["_ofi_key"].isin(seleccion)]
+    if f_attr != "T":
+        b = b[b["Facturable"] == f_attr]
+    if click_sban:
+        b = b[b["_SBAN"].eq(click_sban)]
+    nombres, vals, hovers = [], [], []
+    for cod, nombre in (("C1", "Componente 1"), ("C2", "Comp. 2 láser"), ("UPS", "UPS")):
+        sub = b[b["_componente"].eq(cod)] if "_componente" in b.columns else b.iloc[0:0]
+        if sub.empty:
+            nombres.append(nombre); vals.append(0.0); hovers.append("sin datos")
+            continue
+        g = sub.groupby("_SBAN")["_mt"].agg(["size", "sum"])
+        tot = int(len(g))
+        inter = int((g["sum"] > 0).sum())
+        nombres.append(nombre)
+        vals.append(round(inter / tot * 100, 1) if tot else 0.0)
+        hovers.append(f"{inter} de {tot} oficinas")
+    fig = go.Figure(go.Bar(
+        x=vals, y=nombres, orientation="h",
+        text=[f"{v:.0f}%" for v in vals], textposition="inside",
+        marker_color=[t["celeste"], t["ambar"], t["verde"]],
+        customdata=hovers,
+        hovertemplate="<b>%{y}</b><br>Cobertura oficinas: %{x}%<br>%{customdata}<extra></extra>",
+    ))
+    fig.update_layout(
+        title=dict(text="<b>Oficinas con MT3 por componente</b>",
+                   font=dict(size=15, color=t["ink"]), x=0.02),
+        height=250, margin=dict(l=10, r=10, t=45, b=10), showlegend=False,
+        xaxis=dict(range=[0, 100], visible=False),
+        yaxis=dict(autorange="reversed", tickfont=dict(color=t["ink"], size=12)),
+        **plotly_base(),
+    )
+    return fig
+
+
+def grafico_bullet_oficinas(datos: pd.DataFrame):
+    """Barra 100% de oficinas por estado de cobertura del módulo activo."""
+    t = tema_actual()
+    if datos.empty or "_SBAN" not in datos.columns:
+        return None
+    g = datos.groupby("_SBAN")["_mt"].agg(["size", "sum"])
+    comp = int((g["sum"] >= g["size"]).sum())
+    parcial = int(((g["sum"] > 0) & (g["sum"] < g["size"])).sum())
+    cero = int((g["sum"] == 0).sum())
+    fig = go.Figure()
+    for nombre, valor, color in (("Completas", comp, t["verde"]),
+                                 ("En proceso", parcial, t["ambar"]),
+                                 ("Sin iniciar", cero, t["rojo"])):
+        fig.add_bar(y=["Oficinas"], x=[valor], orientation="h", name=nombre,
+                    marker_color=color, text=[f"{nombre}: {valor}"],
+                    textposition="inside", insidetextanchor="middle",
+                    hovertemplate=f"{nombre}: %{{x}} oficinas<extra></extra>")
+    fig.update_layout(
+        title=dict(text="<b>Oficinas por estado de cobertura</b>",
+                   font=dict(size=15, color=t["ink"]), x=0.02),
+        barmode="stack", height=250, margin=dict(l=10, r=10, t=45, b=10),
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        legend=dict(orientation="h", y=-0.05, x=0, font=dict(color=t["muted"])),
+        **plotly_base(),
+    )
+    return fig
+
+
+def grafico_sparkline_tendencia(datos: pd.DataFrame):
+    """Mini tendencia de MT3 por día, sin ejes ni cifras (para vista ejecutiva)."""
+    t = tema_actual()
+    if "Fecha de mantenimiento 3" not in datos.columns:
+        return None
+    d = datos[datos["_mt"]].copy()
+    d["_f"] = pd.to_datetime(d["Fecha de mantenimiento 3"], errors="coerce")
+    d = d[d["_f"].notna()]
+    if d.empty:
+        return None
+    serie = d.groupby(d["_f"].dt.date).size().sort_index()
+    cel = str(t["celeste"]).lstrip("#")
+    try:
+        rr, gg, bb = int(cel[0:2], 16), int(cel[2:4], 16), int(cel[4:6], 16)
+        relleno = f"rgba({rr},{gg},{bb},0.15)"
+    except (ValueError, IndexError):
+        relleno = "rgba(34,211,238,0.15)"
+    fig = go.Figure(go.Scatter(
+        x=[f"{f:%d/%m}" for f in serie.index], y=serie.values, mode="lines",
+        line=dict(color=t["celeste"], width=2), fill="tozeroy", fillcolor=relleno,
+        hovertemplate="%{x}<br>%{y} MT3<extra></extra>"))
+    fig.update_layout(
+        title=dict(text="<b>Tendencia MT3 por día</b>", font=dict(size=15, color=t["ink"]), x=0.02),
+        height=200, margin=dict(l=10, r=10, t=40, b=10), showlegend=False,
+        xaxis=dict(visible=False), yaxis=dict(visible=False),
+        **plotly_base(),
+    )
+    return fig
+
+
+def render_vista_ejecutiva(filtrado: pd.DataFrame, df: pd.DataFrame, seleccion: list,
+                           f_attr: str, click_sban=None):
+    """Vista solo de KPIs visuales: 5 gráficos, sin tablas ni cifras duras de KPIs."""
+    st.markdown("#### 🎯 Vista ejecutiva · indicadores visuales")
+    cfg = {"displaylogo": False, "modeBarButtonsToRemove": ["lasso2d", "select2d"]}
+    if filtrado.empty:
+        st.info("Sin datos con los filtros actuales.")
+        return
+    realizados = int(filtrado["_mt"].sum())
+    pendientes = int(filtrado["_pendiente"].sum())
+
+    f1a, f1b = st.columns(2)
+    with f1a:
+        st.plotly_chart(grafico_gauge(realizados, pendientes), width="stretch", config=cfg)
+    with f1b:
+        st.plotly_chart(grafico_dona(realizados, pendientes), width="stretch", config=cfg)
+
+    f2a, f2b = st.columns([1.4, 1])
+    with f2a:
+        st.plotly_chart(grafico_mini_componentes(df, seleccion, f_attr, click_sban),
+                        width="stretch", config=cfg)
+    with f2b:
+        figb = grafico_bullet_oficinas(filtrado)
+        if figb is not None:
+            st.plotly_chart(figb, width="stretch", config=cfg)
+        else:
+            st.info("Sin oficinas para mostrar.")
+
+    figs = grafico_sparkline_tendencia(filtrado)
+    if figs is not None:
+        st.plotly_chart(figs, width="stretch", config=cfg)
+    else:
+        st.info("Sin fechas de MT3 para la tendencia.")
+
+
 def _color_en_escala(escala, frac):
     """Interpola un color (RGB) en la escala, en la posición 0..1 (igual que Plotly)."""
     def rgb(h):
@@ -2101,15 +2236,7 @@ def main():
                        "Revisa el filtro de Oficina o la atribución.")
         st.stop()
 
-    # --- Encabezado hero + KPIs ---
-    scope = "Todas las oficinas" if not seleccion else f"{len(seleccion)} oficina(s)"
-    atrib = {"T": "Todos", "Si": "BANCO (Facturable Si)", "No": "COLSOF (No facturable)"}[f_attr]
-    encabezado_hero(modulo, scope, atrib, len(filtrado), conteos, nov_resumen, fecha_corte)
-
-    # --- Barra VISIBLE de facturación (Opción 1: filtro a la vista + conteos) ---
-    barra_facturacion(df_mod)
-
-    # --- Validación de integridad de los archivos en uso ---
+    # --- Validación de integridad (siempre; detiene si hay críticos) ---
     p_crono_val = ruta_crono_act()
     if p_crono_val.exists():
         criticos, avisos = validar_integridad(
@@ -2123,6 +2250,30 @@ def main():
         for msg in criticos:
             st.error(msg)
         st.stop()
+
+    # --- Selector de vista: Ejecutiva (solo visuales) u Operativa (detalle) ---
+    if hasattr(st, "segmented_control"):
+        vista = st.segmented_control("Vista", ["Operativa", "Ejecutiva"],
+                                     default="Operativa", key="vista_v2")
+    else:
+        vista = st.radio("Vista", ["Operativa", "Ejecutiva"], horizontal=True,
+                         key="vista_v2")
+    vista = vista or "Operativa"
+    if vista == "Ejecutiva":
+        render_vista_ejecutiva(filtrado, df, seleccion, f_attr,
+                               st.session_state.get("click_sban"))
+        st.markdown("---")
+        st.caption(f"Vista Ejecutiva · Módulo {modulo} · 1 fila = 1 elemento (Serial único).")
+        return
+
+    # --- Operativa: encabezado hero + KPIs ---
+    scope = "Todas las oficinas" if not seleccion else f"{len(seleccion)} oficina(s)"
+    atrib = {"T": "Todos", "Si": "BANCO (Facturable Si)", "No": "COLSOF (No facturable)"}[f_attr]
+    encabezado_hero(modulo, scope, atrib, len(filtrado), conteos, nov_resumen, fecha_corte)
+
+    # --- Barra VISIBLE de facturación (Opción 1: filtro a la vista + conteos) ---
+    barra_facturacion(df_mod)
+
     if avisos:
         with st.expander(f"🔍 Validación de integridad — {len(avisos)} aviso(s)",
                          expanded=False):

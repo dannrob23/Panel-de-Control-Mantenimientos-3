@@ -1366,9 +1366,9 @@ def tarjetas_destacadas(datos: pd.DataFrame):
             unsafe_allow_html=True)
     with c3:
         st.markdown(
-            f'<div class="kd"><div class="kd-lbl">🛠️ Equipos impactados</div>'
-            f'<div class="kd-num">{fmt(total)}</div>'
-            f'<div class="kd-sub">{fmt(realizados)} ya intervenidos'
+            f'<div class="kd"><div class="kd-lbl">🛠️ Equipos intervenidos</div>'
+            f'<div class="kd-num">{fmt(realizados)}</div>'
+            f'<div class="kd-sub">de {fmt(total)} equipos'
             + (f' · últimas {len(serie)} jornadas' if len(serie) > 1 else '') + '</div>'
             + (f'<div style="margin-top:7px">{spark}</div>' if spark else '')
             + '</div>',

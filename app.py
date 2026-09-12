@@ -1738,220 +1738,6 @@ def _texto_contraste(escala, frac):
     return "#0A0E14" if lum > 0.55 else "#FFFFFF"
 
 
-def grafico_waffle(realizados: int, pendientes: int, celdas: int = 100):
-    """Waffle (100 cuadritos): proporción hecho vs pendiente. Reemplaza la dona."""
-    t = tema_actual()
-    total = int(realizados) + int(pendientes)
-    if total <= 0:
-        return None
-    n_ok = int(round(realizados / total * celdas))
-    vals = [0] * n_ok + [1] * (celdas - n_ok)          # 0 = hecho (verde), 1 = pendiente (ámbar)
-    lado = 10
-    m = [vals[i * lado:(i + 1) * lado] for i in range(celdas // lado)]
-    pct = n_ok
-    fig = go.Figure(go.Heatmap(
-        z=m, xgap=3, ygap=3, showscale=False, zmin=0, zmax=1,
-        colorscale=[[0, t["verde"]], [1, t["pend"]]], hoverinfo="skip"))
-    fig.update_layout(
-        title=dict(text=f"<b>Waffle: {pct} de cada 100 equipos ya intervenidos</b>",
-                   font=dict(size=15, color=t["ink"]), x=0.02),
-        height=330, margin=dict(l=14, r=14, t=52, b=26),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(showgrid=False, showticklabels=False, zeroline=False, scaleanchor="y"),
-        yaxis=dict(showgrid=False, showticklabels=False, zeroline=False, autorange="reversed"),
-        annotations=[
-            dict(x=1.0, y=-0.04, xref="paper", yref="paper", showarrow=False,
-                 text=f'<span style="color:{t["verde"]}">■ Hecho {realizados:,}</span>'
-                      f'&nbsp;&nbsp;<span style="color:{t["pend"]}">■ Pendiente {pendientes:,}</span>'.replace(",", "."),
-                 font=dict(size=12, color=t["muted"]))])
-    return fig
-
-
-def grafico_dumbbell(datos: pd.DataFrame, top_n: int = 12):
-    """Dumbbell: subsanados ↔ pendientes por sede. Reemplaza el ranking de barras."""
-    t = tema_actual()
-    if "_SBAN" not in datos.columns or "_mt" not in datos.columns or datos.empty:
-        return None
-    clave = "_ofi_key" if "_ofi_key" in datos.columns else "_SBAN"
-    g = (datos.groupby(["_SBAN", clave], as_index=False)
-         .agg(total=("_mt", "size"), mt=("_mt", "sum")))
-    g["pend"] = g["total"] - g["mt"]
-    g = g.nlargest(top_n, "pend").sort_values("pend")
-    if g.empty:
-        return None
-    etiquetas = [f"{str(s)} · {str(o)[:22]}" for s, o in zip(g["_SBAN"], g[clave])]
-
-    fig = go.Figure()
-    xs, ys = [], []
-    for i, r in enumerate(g.itertuples()):
-        xs += [r.mt, r.pend, None]
-        ys += [i, i, None]
-    fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", hoverinfo="skip", showlegend=False,
-                             line=dict(color=t["muted"], width=2, dash="dot")))
-    fig.add_trace(go.Scatter(
-        x=g["mt"], y=list(range(len(g))), mode="markers+text", name="Subsanados",
-        marker=dict(color=t["verde"], size=11),
-        text=[f"{v:,}".replace(",", ".") if v >= 20 else "" for v in g["mt"]],
-        textposition="middle left", textfont=dict(color=t["muted"], size=10),
-        hovertemplate="<b>%{customdata}</b><br>Subsanados: %{x:,}<extra></extra>",
-        customdata=etiquetas))
-    fig.add_trace(go.Scatter(
-        x=g["pend"], y=list(range(len(g))), mode="markers+text", name="Pendientes",
-        marker=dict(color=t["pend"], size=13, line=dict(color=t["card"], width=1)),
-        text=[f"{v:,}".replace(",", ".") for v in g["pend"]],
-        textposition="middle right", textfont=dict(color=t["ink"], size=10.5),
-        hovertemplate="<b>%{customdata}</b><br>Pendientes: %{x:,}<extra></extra>",
-        customdata=etiquetas))
-    fig.update_layout(
-        title=dict(text=f"<b>Subsanados ↔ Pendientes por sede (top {len(g)})</b>",
-                   font=dict(size=15, color=t["ink"]), x=0.02),
-        height=max(340, 30 * len(g) + 130), margin=dict(l=10, r=34, t=54, b=26),
-        xaxis=dict(title="", gridcolor=t["grid"], zeroline=False, color=t["muted"]),
-        yaxis=dict(tickmode="array", tickvals=list(range(len(g))), ticktext=etiquetas,
-                   color=t["muted"], tickfont=dict(size=10)),
-        legend=dict(orientation="h", y=1.04, x=0.62, font=dict(color=t["muted"])),
-        **plotly_base())
-    return fig
-
-
-def grafico_small_multiples(datos: pd.DataFrame, cols: int = 3):
-    """Small multiples: una mini-tarjeta por regional (hecho vs pendiente + % avance)."""
-    t = tema_actual()
-    if "Regional" not in datos.columns or datos.empty:
-        return None
-    g = (datos.groupby("Regional", as_index=False)
-         .agg(total=("_mt", "size"), mt=("_mt", "sum")))
-    g["pend"] = g["total"] - g["mt"]
-    g["avance"] = (g["mt"] / g["total"] * 100).round(0)
-    g = g.sort_values("avance", ascending=False).reset_index(drop=True)
-    if g.empty:
-        return None
-    from plotly.subplots import make_subplots
-    filas = (len(g) + cols - 1) // cols
-    titulos = [f"<b>{r.Regional}</b> · {r.avance:.0f}%" for r in g.itertuples()]
-    fig = make_subplots(rows=filas, cols=cols, subplot_titles=titulos,
-                        horizontal_spacing=0.06, vertical_spacing=0.16)
-    for i, r in enumerate(g.itertuples()):
-        ri, ci = divmod(i, cols)
-        fig.add_trace(go.Bar(x=[r.mt], y=[""], orientation="h", marker_color=t["verde"],
-                             name="Subsanados", showlegend=(i == 0),
-                             hovertemplate=f"<b>{r.Regional}</b><br>Subsanados: {r.mt:,}<extra></extra>"),
-                      row=ri + 1, col=ci + 1)
-        fig.add_trace(go.Bar(x=[r.pend], y=[""], orientation="h", marker_color=t["pend"],
-                             name="Pendientes", showlegend=(i == 0),
-                             hovertemplate=f"<b>{r.Regional}</b><br>Pendientes: {r.pend:,}<extra></extra>"),
-                      row=ri + 1, col=ci + 1)
-        fig.add_annotation(x=r.total, y="", text=f" {r.total:,}".replace(",", "."),
-                           showarrow=False, xanchor="left", font=dict(size=9.5, color=t["muted"]),
-                           row=ri + 1, col=ci + 1)
-    fig.update_layout(
-        title=dict(text="<b>Small multiples: avance por regional</b>",
-                   font=dict(size=15, color=t["ink"]), x=0.02),
-        height=max(300, 150 * filas + 90), margin=dict(l=14, r=24, t=64, b=22),
-        barmode="stack", bargap=0.42,
-        legend=dict(orientation="h", y=1.05, x=0.55, font=dict(color=t["muted"])),
-        **plotly_base())
-    fig.update_xaxes(visible=False)
-    fig.update_yaxes(visible=False)
-    return fig
-
-
-def grafico_sankey(datos: pd.DataFrame):
-    """Sankey: de Regional al estado del cronograma (flujo del proceso)."""
-    t = tema_actual()
-    if "Regional" not in datos.columns or "_est_crono" not in datos.columns or datos.empty:
-        return None
-    d = datos.copy()
-    d["_est"] = (d["_est_crono"].astype(str)
-                 .str.replace(r"^[^A-Za-zÁÉÍÓÚáéíóúñ]+", "", regex=True)
-                 .str.replace(r"\s+", " ", regex=True).str.strip())
-    orden = ["Programada", "En proceso", "Finalizada", "Reprogramada", "Sin cronograma"]
-
-    def _norm_est(v) -> str:
-        """Normaliza el estado a uno de los 5 conocidos (evita nodos duplicados)."""
-        v = str(v).strip().lower()
-        if v.startswith("program"):
-            return "Programada"
-        if v.startswith("en proc"):
-            return "En proceso"
-        if v.startswith("finaliz"):
-            return "Finalizada"
-        if v.startswith("reprogram"):
-            return "Reprogramada"
-        return "Sin cronograma"
-
-    d["_est"] = d["_est"].map(_norm_est)
-    d = d[d["Regional"].notna() & (d["Regional"].astype(str).str.strip() != "")]
-    ests = [e for e in orden if e in set(d["_est"])]
-    if not ests or d.empty:
-        return None
-    g = d.groupby(["Regional", "_est"]).size().reset_index(name="n")
-    regs = sorted({str(x) for x in g["Regional"].unique()})
-    nodos = regs + ests
-    idx = {n: i for i, n in enumerate(nodos)}
-    color_est = {"Programada": t["primario"], "En proceso": t["pend"], "Finalizada": t["verde"],
-                 "Reprogramada": t["morado"], "Sin cronograma": t["muted"]}
-    colores = [t["primario"]] * len(regs) + [color_est.get(e, t["muted"]) for e in ests]
-    try:
-        fig = go.Figure(go.Sankey(
-            arrangement="snap",
-            node=dict(label=nodos, color=colores, pad=14, thickness=15,
-                      line=dict(color=t["bg"], width=1)),
-            link=dict(source=[idx[str(s)] for s in g["Regional"]],
-                      target=[idx[e] for e in g["_est"]],
-                      value=g["n"].tolist(),
-                      color=[t["primario"] + "40"] * len(g)),
-            textfont=dict(color=t["ink"], size=11)))
-        fig.update_layout(
-            title=dict(text="<b>Sankey: de Regional al estado del cronograma</b>",
-                       font=dict(size=15, color=t["ink"]), x=0.02),
-            height=max(360, 26 * len(regs) + 150), margin=dict(l=12, r=12, t=56, b=18),
-            **plotly_base())
-    except Exception:  # noqa: BLE001 — nunca romper el panel por un gráfico
-        return None
-    return fig
-
-
-def grafico_gantt(max_sedes: int = 16):
-    """Gantt: ventanas del cronograma (fecha inicio → fin) por sede."""
-    t = tema_actual()
-    try:
-        ruta = ruta_crono_act()
-        c = pd.read_excel(ruta)
-    except Exception:  # noqa: BLE001
-        return None
-    if c is None or c.empty or "Fecha Inicio" not in c.columns or "Fecha Fin" not in c.columns:
-        return None
-    c = c.copy()
-    c["_ini"] = pd.to_datetime(c["Fecha Inicio"], errors="coerce")
-    c["_fin"] = pd.to_datetime(c["Fecha Fin"], errors="coerce")
-    c = c.dropna(subset=["_ini", "_fin"])
-    if c.empty:
-        return None
-    col_ofi = next((x for x in ("Nombre Oficina", "Oficina") if x in c.columns), None)
-    c["_et"] = [f"{str(s)} · {str(o)[:20]}" if col_ofi else str(s)
-                for s, o in zip(c.get("SBAN", c.index), c[col_ofi] if col_ofi else c.get("SBAN", c.index))]
-    c["_est"] = (c["ESTADO"].astype(str).str.replace(r"^[^A-Za-zÁÉÍÓÚáéíóúñ]+", "", regex=True).str.strip()
-                 if "ESTADO" in c.columns else "Programada")
-    c = c.sort_values("_ini").head(max_sedes)
-    try:
-        import plotly.express as px
-        fig = px.timeline(c, x_start="_ini", x_end="_fin", y="_et", color="_est",
-                          color_discrete_map={"Finalizada": t["verde"], "En proceso": t["pend"],
-                                              "Programada": t["primario"], "Reprogramada": t["morado"]})
-    except Exception:  # noqa: BLE001
-        return None
-    fig.update_yaxes(autorange="reversed", color=t["muted"], tickfont=dict(size=10))
-    fig.update_layout(
-        title=dict(text=f"<b>Cronograma: ventanas de visita (primeras {len(c)} sedes)</b>",
-                   font=dict(size=15, color=t["ink"]), x=0.02),
-        height=max(340, 26 * len(c) + 140), margin=dict(l=10, r=20, t=56, b=24),
-        xaxis=dict(title="", color=t["muted"], gridcolor=t["grid"]),
-        legend=dict(orientation="h", y=1.04, x=0.5, font=dict(color=t["muted"]), title=None),
-        **plotly_base())
-    return fig
-
-
 def grafico_heatmap(datos: pd.DataFrame):
     """Heatmap Regional × Estado con pendientes, total y avance."""
     t = tema_actual()
@@ -2755,17 +2541,9 @@ def main():
     with tab_graf:
         fila1a, fila1b = st.columns([1, 1])
         with fila1a:
-            # Waffle (nuevo) — si no se puede dibujar, cae en la dona clásica
-            try:
-                fig_w = grafico_waffle(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum()))
-            except Exception:  # noqa: BLE001
-                fig_w = None
-            if fig_w is not None:
-                st.plotly_chart(fig_w, width="stretch", config=cfg_chart)
-            else:
-                st.plotly_chart(
-                    grafico_dona(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
-                    width="stretch", config=cfg_chart)
+            st.plotly_chart(
+                grafico_dona(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
+                width="stretch", config=cfg_chart)
         with fila1b:
             st.plotly_chart(
                 grafico_gauge(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
@@ -2776,34 +2554,20 @@ def main():
             top_n = st.segmented_control("Sedes a mostrar en el ranking",
                                          options=[5, 10, 12, 15, 20, 25], default=12,
                                          key="top_n_pend") or 12
+            sel = st.plotly_chart(
+                grafico_top_pendientes(filtrado, top_n=top_n), width="stretch",
+                config=cfg_sel, key="chart_top", on_select="rerun", selection_mode="points")
             try:
-                fig_d = grafico_dumbbell(filtrado, top_n=top_n)
+                pts = sel.selection.points if (sel is not None and getattr(sel, "selection", None)) else []
             except Exception:  # noqa: BLE001
-                fig_d = None
-            if fig_d is None:
-                st.plotly_chart(grafico_top_pendientes(filtrado, top_n=top_n),
-                                width="stretch", config=cfg_chart)
-            else:
-                sel = st.plotly_chart(
-                    fig_d, width="stretch", config=cfg_sel, key="chart_top",
-                    on_select="rerun", selection_mode="points")
-                try:
-                    pts = sel.selection.points if (sel is not None and getattr(sel, "selection", None)) else []
-                except Exception:  # noqa: BLE001
-                    pts = []
-                if pts:
-                    punto = pts[0] or {}
-                    cd = punto.get("customdata")
-                    etiqueta = (str(cd[0]) if isinstance(cd, (list, tuple)) and cd
-                                else str(cd) if cd else "")
-                    if not etiqueta:
-                        etiqueta = str(punto.get("y") or punto.get("x") or "")
-                    candidato = etiqueta[:5]
-                    if candidato.isdigit() and st.session_state.get("click_sban") != candidato:
-                        st.session_state["click_sban"] = candidato
-                        st.rerun()
-                st.caption("💡 Haz clic en un punto para filtrar el panel por esa sede "
-                           "(verde = subsanado · ámbar = pendiente).")
+                pts = []
+            if pts:
+                etiqueta = str(pts[0].get("y") or pts[0].get("x") or "")
+                candidato = etiqueta[:5]
+                if candidato.isdigit() and st.session_state.get("click_sban") != candidato:
+                    st.session_state["click_sban"] = candidato
+                    st.rerun()
+            st.caption("💡 Haz clic en una barra para filtrar el panel por esa sede.")
         with fila2b:
             fig_t = grafico_tendencia(filtrado)
             if fig_t is not None:
@@ -2815,33 +2579,9 @@ def main():
         if fig_h is not None:
             st.plotly_chart(fig_h, width="stretch", config=cfg_chart)
 
-        # Small multiples por regional (comparación ejecutiva)
-        try:
-            fig_sm = grafico_small_multiples(filtrado)
-            if fig_sm is not None:
-                st.plotly_chart(fig_sm, width="stretch", config=cfg_chart)
-        except Exception as exc:  # noqa: BLE001
-            st.caption(f"⚠️ No se pudo dibujar el gráfico por regional: {exc}")
-
-        # Sankey: flujo Regional → Estado del cronograma
-        try:
-            fig_sk = grafico_sankey(filtrado)
-            if fig_sk is not None:
-                st.plotly_chart(fig_sk, width="stretch", config=cfg_chart)
-        except Exception as exc:  # noqa: BLE001
-            st.caption(f"⚠️ No se pudo dibujar el diagrama de flujo: {exc}")
-
     with tab_res:
         # Resumen por oficina (Total / Subsanados / Pendientes / % Avance / Novedades)
         render_resumen(base_oficina, seleccion, f_attr, nov_resumen)
-        # Gantt del cronograma (ventanas de visita por sede)
-        try:
-            fig_g = grafico_gantt()
-        except Exception:  # noqa: BLE001
-            fig_g = None
-        if fig_g is not None:
-            with st.expander("📅 Cronograma: ventanas de visita por sede (Gantt)", expanded=False):
-                st.plotly_chart(fig_g, width="stretch", config=cfg_chart)
 
     with tab_nov:
         # Tabla de gestión de novedades

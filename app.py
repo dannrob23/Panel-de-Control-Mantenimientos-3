@@ -1323,8 +1323,8 @@ def _sparkline_svg(valores, color: str, w: int = 118, h: int = 30) -> str:
             f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="3" fill="{color}"/></svg>')
 
 
-def tarjetas_destacadas(datos: pd.DataFrame):
-    """KPIs principales (se muestran de primera): oficinas · % de avance · equipos impactados."""
+def tarjetas_destacadas(datos: pd.DataFrame, kpi_campos=None, seleccion=None):
+    """KPIs principales: oficinas intervenidas · % de avance · equipos intervenidos."""
     t = tema_actual()
     if datos is None or len(datos) == 0:
         return
@@ -1335,6 +1335,29 @@ def tarjetas_destacadas(datos: pd.DataFrame):
     n_ofi = (int(datos["_ofi_key"].nunique()) if "_ofi_key" in datos.columns
              else int(datos["SBAN"].nunique()))
     n_reg = int(datos["Regional"].nunique()) if "Regional" in datos.columns else 0
+    # Oficinas INTERVENIDAS = sedes marcadas "Finalizada" en Campos (col N), igual que el resto del panel
+    n_ofi_int = None
+    if kpi_campos is not None and not getattr(kpi_campos, "empty", True):
+        try:
+            c_est = _col(kpi_campos, "Estado de la sede")
+            c_sb = _col(kpi_campos, "SBAN")
+            kk = kpi_campos.copy()
+            if c_sb:
+                kk["_SBAN"] = kk[c_sb].apply(_pad5)
+                if seleccion:
+                    sbans = {str(s).split(" - ")[0] for s in seleccion}
+                    kk = kk[kk["_SBAN"].isin(sbans)]
+            if c_est:
+                vals = kk[c_est].fillna("").astype(str).str.strip()
+                n_ofi_int = int((vals == "Finalizada").sum())
+        except Exception:  # noqa: BLE001
+            n_ofi_int = None
+    if n_ofi_int is None:      # respaldo si Campos no está disponible
+        try:
+            g_of = datos.groupby("_SBAN")["_mt"].agg(["size", "sum"])
+            n_ofi_int = int((g_of["sum"] > 0).sum())
+        except Exception:  # noqa: BLE001
+            n_ofi_int = n_ofi
     total = int(len(datos))
     realizados = int(datos["_mt"].sum())
     avance = (realizados / total * 100) if total else 0.0
@@ -1351,9 +1374,9 @@ def tarjetas_destacadas(datos: pd.DataFrame):
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown(
-            f'<div class="kd"><div class="kd-lbl">🏢 Oficinas</div>'
-            f'<div class="kd-num">{fmt(n_ofi)}</div>'
-            f'<div class="kd-sub">sedes con equipos en el filtro'
+            f'<div class="kd"><div class="kd-lbl">🏢 Oficinas intervenidas</div>'
+            f'<div class="kd-num">{fmt(n_ofi_int)}</div>'
+            f'<div class="kd-sub">de {fmt(n_ofi)} oficinas'
             + (f' · {n_reg} regionales' if n_reg else '') + '</div></div>',
             unsafe_allow_html=True)
     with c2:
@@ -2496,7 +2519,7 @@ def main():
     vista = vista or "Operativa"
     if vista == "Ejecutiva":
         # Mismo bloque de KPIs principales que la vista operativa (lenguaje visual unificado)
-        tarjetas_destacadas(filtrado)
+        tarjetas_destacadas(filtrado, kpi_campos, seleccion)
         render_vista_ejecutiva(filtrado, df, seleccion, f_attr,
                                st.session_state.get("click_sban"))
         st.markdown("---")
@@ -2518,7 +2541,7 @@ def main():
                 st.warning(msg)
 
     # --- KPIs PRINCIPALES (de primera): oficinas, % de avance y equipos impactados ---
-    tarjetas_destacadas(filtrado)
+    tarjetas_destacadas(filtrado, kpi_campos, seleccion)
 
     # --- KPIs de detalle ---
     render_kpis(filtrado)

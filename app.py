@@ -92,12 +92,15 @@ h1, h2, h3, h4 { color: __INK__ !important; font-weight: 800 !important; letter-
 p, li, label { color: __INK__ !important; }
 [data-testid="stCaptionContainer"] p, .stCaption, small { color: __MUTED__ !important; }
 [data-testid="stMetric"] { background: __CARD__ !important; border: 1px solid __BORDER__ !important;
-  border-radius: 14px; padding: 14px 16px; box-shadow: __SOMBRA__; }
+  border-radius: 14px; padding: 12px 12px; box-shadow: __SOMBRA__; }
 [data-testid="stMetricValue"] { color: __INK__ !important; font-weight: 800 !important;
-  font-size: 1.8rem !important; letter-spacing: -.6px; }
+  font-size: 1.4rem !important; letter-spacing: -.6px;
+  white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important; }
+[data-testid="stMetricValue"] > div, [data-testid="stMetricValue"] > span {
+  white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important; }
 [data-testid="stMetricLabel"] p { color: __MUTED__ !important; font-weight: 600 !important;
-  font-size: .82rem !important; white-space: normal !important; overflow: visible !important;
-  text-overflow: clip !important; line-height: 1.25 !important; }
+  font-size: .76rem !important; white-space: normal !important; overflow: visible !important;
+  text-overflow: clip !important; line-height: 1.2 !important; }
 .stButton > button { border-radius: 10px !important; border: 1px solid __BORDER__ !important;
   background: __CARD__ !important; color: __INK__ !important; font-weight: 600 !important; }
 .stButton > button p { color: inherit !important; }
@@ -155,6 +158,17 @@ button[role="radio"][aria-checked="true"] p, button[role="radio"][aria-checked="
   color: __MUTED__ !important; }
 [data-testid="stMainMenu"] { color: __MUTED__ !important; }
 
+/* ===== KPIs destacados (oficinas · avance · equipos impactados) ===== */
+.kd { background: __CARD__ !important; border: 1px solid __BORDER__ !important;
+  border-radius: 16px; padding: 15px 18px 14px; box-shadow: __SOMBRA__; height: 100%; }
+.kd-lbl { font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase;
+  color: __MUTED__ !important; }
+.kd-num { font-size: 40px; font-weight: 800; letter-spacing: -1.8px; color: __INK__ !important;
+  line-height: 1.05; margin-top: 6px; }
+.kd-sub { font-size: 11.5px; color: __MUTED__ !important; margin-top: 6px; }
+.kd-bar { height: 7px; border-radius: 99px; background: __BORDER__; margin-top: 10px; overflow: hidden; }
+.kd-bar > i { display: block; height: 100%; border-radius: 99px; }
+
 /* ================= RESPONSIVE (tablet y móvil) ================= */
 @media (max-width: 1000px) {
   [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; gap: .55rem !important; }
@@ -166,6 +180,7 @@ button[role="radio"][aria-checked="true"] p, button[role="radio"][aria-checked="
   #mt3-hero-titulo { font-size: 19px !important; line-height: 1.2 !important; }
   #mt3-hero-sub { font-size: 12px !important; }
   [data-testid="stMetricValue"] { font-size: 1.45rem !important; }
+  .kd-num { font-size: 30px !important; letter-spacing: -1px !important; }
   [data-testid="stMetric"] { padding: 11px 13px !important; }
   [data-testid="stMainBlockContainer"] { padding: .8rem .7rem 2.5rem !important; }
   p, li, label { font-size: .93rem !important; }
@@ -1211,6 +1226,78 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
 # ----------------------------------------------------------------------------
 # Métricas KPI
 # ----------------------------------------------------------------------------
+def _sparkline_svg(valores, color: str, w: int = 118, h: int = 30) -> str:
+    """Sparkline SVG inline (sin dependencias) a partir de una serie de valores."""
+    vals = [float(v) for v in valores if v is not None]
+    if len(vals) < 2:
+        return ""
+    vmin, vmax = min(vals), max(vals)
+    rango = (vmax - vmin) or 1.0
+    n = len(vals)
+    pts = [(2 + i * (w - 4) / (n - 1), (h - 3) - ((v - vmin) / rango) * (h - 9))
+           for i, v in enumerate(vals)]
+    linea = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+    area = f"{pts[0][0]:.1f},{h - 2} " + linea + f" {pts[-1][0]:.1f},{h - 2}"
+    cx, cy = pts[-1]
+    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" style="display:block">'
+            f'<polygon points="{area}" fill="{color}" opacity=".15"/>'
+            f'<polyline points="{linea}" fill="none" stroke="{color}" stroke-width="2" '
+            f'stroke-linejoin="round" stroke-linecap="round"/>'
+            f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="3" fill="{color}"/></svg>')
+
+
+def tarjetas_destacadas(datos: pd.DataFrame):
+    """KPIs principales (se muestran de primera): oficinas · % de avance · equipos impactados."""
+    t = tema_actual()
+    if datos is None or len(datos) == 0:
+        return
+
+    def fmt(n) -> str:
+        return f"{int(n):,}".replace(",", ".")
+
+    n_ofi = (int(datos["_ofi_key"].nunique()) if "_ofi_key" in datos.columns
+             else int(datos["SBAN"].nunique()))
+    n_reg = int(datos["Regional"].nunique()) if "Regional" in datos.columns else 0
+    total = int(len(datos))
+    realizados = int(datos["_mt"].sum())
+    avance = (realizados / total * 100) if total else 0.0
+    av_txt = f"{avance:.1f}".replace(".", ",") + " %"
+
+    serie: list = []
+    if "Fecha de mantenimiento 3" in datos.columns:
+        f = pd.to_datetime(datos.loc[datos["_mt"], "Fecha de mantenimiento 3"],
+                           errors="coerce").dropna()
+        if not f.empty:
+            serie = f.dt.date.value_counts().sort_index().values.tolist()
+    spark = _sparkline_svg(serie, t["verde"])
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(
+            f'<div class="kd"><div class="kd-lbl">🏢 Oficinas</div>'
+            f'<div class="kd-num">{fmt(n_ofi)}</div>'
+            f'<div class="kd-sub">sedes con equipos en el filtro'
+            + (f' · {n_reg} regionales' if n_reg else '') + '</div></div>',
+            unsafe_allow_html=True)
+    with c2:
+        st.markdown(
+            f'<div class="kd"><div class="kd-lbl">📈 Avance MT3</div>'
+            f'<div class="kd-num">{av_txt}</div>'
+            f'<div class="kd-bar"><i style="width:{max(0.0, min(100.0, avance)):.1f}%;'
+            f'background:{t["verde"]}"></i></div>'
+            f'<div class="kd-sub">{fmt(realizados)} de {fmt(total)} equipos</div></div>',
+            unsafe_allow_html=True)
+    with c3:
+        st.markdown(
+            f'<div class="kd"><div class="kd-lbl">🛠️ Equipos impactados</div>'
+            f'<div class="kd-num">{fmt(total)}</div>'
+            f'<div class="kd-sub">{fmt(realizados)} ya intervenidos'
+            + (f' · últimas {len(serie)} jornadas' if len(serie) > 1 else '') + '</div>'
+            + (f'<div style="margin-top:7px">{spark}</div>' if spark else '')
+            + '</div>',
+            unsafe_allow_html=True)
+
+
 def render_kpis(datos: pd.DataFrame):
     total = len(datos)
     realizados = int(datos["_mt"].sum())
@@ -1219,16 +1306,16 @@ def render_kpis(datos: pd.DataFrame):
     fact_no = int((datos["Facturable"] == "No").sum())
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("📦 Total de elementos", f"{total:,}".replace(",", "."),
+    c1.metric("📦 Total", f"{total:,}".replace(",", "."),
               help="Equipos en la(s) oficina(s) seleccionada(s)", border=True)
-    c2.metric("✅ Mantenimientos realizados (MT)", f"{realizados:,}".replace(",", "."),
+    c2.metric("✅ Realizados (MT)", f"{realizados:,}".replace(",", "."),
               help="Filas cuyo 'Consecutivo mantenimiento 3' empieza por MT", border=True)
-    c3.metric("⚠️ Mantenimientos pendientes", f"{pendientes:,}".replace(",", "."),
+    c3.metric("⚠️ Pendientes", f"{pendientes:,}".replace(",", "."),
               delta=f"{pendientes/total*100:.1f}%" if total else "0%",
               delta_color="inverse", help="Total de elementos − Realizados", border=True)
     c4.metric("🏦 Facturables (Si)", f"{fact_si:,}".replace(",", "."),
               help="Elementos atribuibles a BANCO", border=True)
-    c5.metric("🏢 No facturables (No)", f"{fact_no:,}".replace(",", "."),
+    c5.metric("🏢 No facturables", f"{fact_no:,}".replace(",", "."),
               help="Elementos de gestión COLSOF", border=True)
     st.caption(
         f"Facturación del filtro actual — BANCO (Si): **{fact_si:,}** · "
@@ -2090,10 +2177,12 @@ def main():
             for msg in avisos:
                 st.warning(msg)
 
+    # --- KPIs PRINCIPALES (de primera): oficinas, % de avance y equipos impactados ---
+    tarjetas_destacadas(filtrado)
+
+    # --- KPIs de detalle ---
     render_kpis(filtrado)
     avance_filtro = float(filtrado["_mt"].mean() * 100) if len(filtrado) else 0.0
-    st.progress(min(max(avance_filtro / 100.0, 0.0), 1.0),
-                text=f"Avance MT3 del filtro actual: {avance_filtro:.1f}%".replace(".", ","))
 
     # --- Filtros activos (chips con X) ---
     barra_filtros_activos(seleccion, solo_pendientes, f_attr,

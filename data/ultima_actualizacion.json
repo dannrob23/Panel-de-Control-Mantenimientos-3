@@ -1,24 +1,24 @@
 {
-  "fecha_hora": "2026-09-10 12:07:35",
+  "fecha_hora": "2026-09-11 15:36:49",
   "anonimizado": true,
   "archivos": {
     "Data_actual.xlsx": {
-      "sha256": "3136edeb2857a6e93bd99a71cc2ce425b09d7c0ae13b3e73bb3c764f66893abd",
-      "bytes": 1751651
+      "sha256": "cf3460f43e9b2087879f58e0e47cdc274fcc6edf297aaf3cfad1c894af9d1956",
+      "bytes": 1783051
     },
     "Campos_actual.xlsx": {
-      "sha256": "87c0e261722b18d81168417b8de354dddaaad2a9f0261c75fb263a11ab6c1074",
-      "bytes": 45594
+      "sha256": "8178c98b85b40fbe49c3f0c02f685d5162f08ff8c705ffd78721137a1cda23b7",
+      "bytes": 44210
     },
     "Cronograma_actual.xlsx": {
-      "sha256": "bcc402859d8c43bc1e3a66c8b614cc8d0584f0db44179210293a3e27cfb25cdd",
-      "bytes": 62064
+      "sha256": "9451b562f15e37dfe64d9df9cc31b2a9d8e7cfbaa208df8d817445b016dcf542",
+      "bytes": 62063
     },
     "Cronograma_UPS_actual.xlsx": {
-      "sha256": "a774b48c3bf7d5d208571fd8fc764c66405efe9ad2eff60e3826f7fceb1da7ca",
-      "bytes": 32963
+      "sha256": "a139507bc4132cb3b3b030adf45ab8f2869b2d45a9f3fafdef451ec4c9c07226",
+      "bytes": 32962
     }
   },
   "filas_data": 31791,
-  "filas_novedades": 22
+  "filas_novedades": 23
 }

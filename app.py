@@ -804,53 +804,83 @@ def _pad5(v):
 
 
 def _col(df, *nombres):
-    """Busca una columna tolerando espacios y mayúsculas/minúsculas."""
-    mapa = {str(c).strip().lower(): c for c in df.columns}
+    """Busca una columna tolerando espacios (dobles/sobrantes) y mayúsculas."""
+    def norm(x):
+        return " ".join(str(x).strip().lower().split())
+    mapa = {norm(c): c for c in df.columns}
     for nom in nombres:
         if nom in df.columns:
             return nom
-        clave = str(nom).strip().lower()
+        clave = norm(nom)
         if clave in mapa:
             return mapa[clave]
     return None
 
 
 def preparar_campos(kpi, nov, df=None):
-    """Normaliza Dashboard_KPI y Novedades Equipos por SBAN (5 dígitos).
+    """Normaliza Dashboard_KPI (estado/observaciones) y Novedades Equipos (por SBAN).
 
-    Asigna `_comp` (C1/C2/UPS) para que las novedades no se trasladen entre módulos:
-    - Con Serial: componente del elemento según la Data.
-    - Sin Serial: C1 por defecto, salvo que el texto mencione UPS o impresora/láser.
+    Las novedades ahora viven en la hoja 'Novedades Equipos' e incluyen su propia
+    columna 'Categoria Novedad' (ya no viene en Dashboard_KPI).
+    Amarre por SBAN (5 dígitos) con respaldo en SBAN PCT.
+    Asigna `_comp` (C1/C2/UPS) para que las novedades no se trasladen entre módulos.
     """
-    k = pd.DataFrame(columns=["_SBAN", "Categoría Novedad", "Estado sede", "Obs. novedad"])
+    k = pd.DataFrame(columns=["_SBAN", "Estado sede", "Obs. novedad"])
     if kpi is not None and not kpi.empty:
-        cat = _col(kpi, "Categoria Novedad", "Categoría Novedad")
         est = _col(kpi, "Estado de la sede")
         obs = _col(kpi, "Observaciones actas PCT")
-        if cat is None:
-            cat = next((c for c in kpi.columns if "ategoria" in str(c) and "ovedad" in str(c)), None)
         sban = kpi[_col(kpi, "SBAN")] if _col(kpi, "SBAN") else pd.Series(dtype=str)
         k = pd.DataFrame({
             "_SBAN": sban.apply(_pad5),
-            "Categoría Novedad": (kpi[cat].fillna("").astype(str).str.strip()
-                                  if cat else pd.Series([""] * len(kpi))),
             "Estado sede": (kpi[est].fillna("").astype(str).str.strip()
                             if est else pd.Series([""] * len(kpi))),
             "Obs. novedad": (kpi[obs].fillna("").astype(str).str.strip()
                              if obs else pd.Series([""] * len(kpi))),
         })
         k = k[k["_SBAN"].astype(str).str.len() > 0]
-        k = k.drop_duplicates("_SBAN", keep="first")
+
+        # Un SBAN puede tener varias filas (Regional/Jefatura/sede): se agrupa con
+        # prioridad para no perder sedes marcadas Finalizada en una fila secundaria.
+        _prio = ["Finalizada", "Reprogramada_Finalizada", "En proceso", "Programada"]
+
+        def _prio_estado(serie):
+            vals = {str(x).strip() for x in serie if str(x).strip()}
+            for p in _prio:
+                if p in vals:
+                    return p
+            return sorted(vals)[0] if vals else ""
+
+        k = (k.groupby("_SBAN", as_index=False)
+              .agg({"Estado sede": _prio_estado, "Obs. novedad": "last"}))
 
     n = pd.DataFrame()
     if nov is not None and not nov.empty:
         n = nov.copy()
-        c_sban = _col(n, "SBAN PCT", "SBAN")
-        n["_SBAN"] = n[c_sban].apply(_pad5) if c_sban else ""
-        n["_FECHA"] = pd.to_datetime(n[_col(n, "Fecha")], errors="coerce") if _col(n, "Fecha") else pd.NaT
+        c_sban = _col(n, "SBAN")
+        c_pct = _col(n, "SBAN PCT")
+        base = (n[c_sban].astype(str) if c_sban else pd.Series([""] * len(n), index=n.index))
+        alt = (n[c_pct].astype(str) if c_pct else pd.Series([""] * len(n), index=n.index))
+        # SBAN es la llave principal; SBAN PCT solo si SBAN viene vacío
+        llave = base.where(base.str.strip().replace("nan", "").ne(""), alt)
+        n["_SBAN"] = llave.apply(_pad5)
+        c_fecha = _col(n, "Fecha")
+        n["_FECHA"] = pd.to_datetime(n[c_fecha], errors="coerce") if c_fecha else pd.NaT
         c_serial = _col(n, "Serial")
         n["_Serial"] = n[c_serial].astype(str).str.strip() if c_serial else ""
+        c_cat = _col(n, "Categoria Novedad", "Categoría Novedad")
+        n["Categoría Novedad"] = (n[c_cat].fillna("").astype(str).str.strip()
+                                  if c_cat else "")
+        c_obs = _col(n, "Observaciones")
+        n["_Obs"] = n[c_obs].astype(str).str.strip() if c_obs else ""
+
         n = n[n["_SBAN"].astype(str).str.len() > 0]
+        # Descartar filas vacías (sin categoría, fecha, serial ni observación)
+        tiene_dato = (n["Categoría Novedad"].str.strip().ne("")
+                      | n["_FECHA"].notna()
+                      | n["_Serial"].str.strip().replace("nan", "").ne("")
+                      | n["_Obs"].str.strip().replace("nan", "").ne(""))
+        n = n[tiene_dato]
+
         tiene_serial = n["_Serial"].notna() & ~n["_Serial"].str.lower().isin(["", "nan"])
         clave = (n["_SBAN"].astype(str) + "|" + n["_Serial"].astype(str) + "|"
                  + n["_FECHA"].astype(str))
@@ -893,32 +923,64 @@ def preparar_campos(kpi, nov, df=None):
 
 
 def resumen_novedades(k, n):
-    """Contador por SBAN: categoría novedad, del día y acumulado (dedupe por Serial+Fecha)."""
+    """Contador por SBAN: categoría (última novedad), del día y acumulado."""
     if n is None or n.empty:
-        base = (k[["_SBAN", "Categoría Novedad", "Obs. novedad", "Estado sede"]].copy()
-                if k is not None and not k.empty else pd.DataFrame(columns=["_SBAN"]))
+        base = (k.copy() if (k is not None and not k.empty)
+                else pd.DataFrame(columns=["_SBAN", "Estado sede", "Obs. novedad"]))
+        if "Categoría Novedad" not in base.columns:
+            base["Categoría Novedad"] = ""
+        if "Obs. novedad" not in base.columns:
+            base["Obs. novedad"] = ""
         base["Novedades del día"] = 0
         base["Novedades acumuladas"] = 0
         base["Última novedad"] = pd.NaT
         base["Fecha de corte"] = pd.NaT
         return base
+
     corte = n["_FECHA"].max()
     acum = n.groupby("_SBAN").size().rename("Novedades acumuladas")
     dia = n[n["_FECHA"].eq(corte)].groupby("_SBAN").size().rename("Novedades del día")
     ult = n.groupby("_SBAN")["_FECHA"].max().rename("Última novedad")
-    res = pd.concat([acum, dia, ult], axis=1).reset_index()
-    res["Novedades del día"] = res["Novedades del día"].fillna(0).astype(int)
-    res["Novedades acumuladas"] = res["Novedades acumuladas"].fillna(0).astype(int)
-    res["Fecha de corte"] = corte
+
+    orden = n.sort_values("_FECHA", na_position="first")
+    if "Categoría Novedad" in n.columns:
+        cc = orden[orden["Categoría Novedad"].astype(str).str.strip().ne("")]
+        cat = cc.groupby("_SBAN")["Categoría Novedad"].last().rename("_cat_det")
+    else:
+        cat = pd.Series(dtype=str)
+    if "Obs. novedad detalle" in n.columns:
+        oo = orden[orden["Obs. novedad detalle"].astype(str).str.strip()
+                   .replace("nan", "").ne("")]
+        obs = oo.groupby("_SBAN")["Obs. novedad detalle"].last().rename("_obs_det")
+    else:
+        obs = pd.Series(dtype=str)
+
+    res = pd.concat([s for s in (acum, dia, ult, cat, obs)
+                     if isinstance(s, pd.Series) and len(s) > 0], axis=1)
+    res.index.name = "_SBAN"
+    res = res.reset_index()
     if k is not None and not k.empty:
         res = res.merge(k, on="_SBAN", how="outer")
-        res["Categoría Novedad"] = res["Categoría Novedad"].fillna("")
-        res["Obs. novedad"] = res["Obs. novedad"].fillna("")
-        res["Estado sede"] = res["Estado sede"].fillna("")
+
+    base_obs = res["Obs. novedad"].fillna("") if "Obs. novedad" in res.columns else ""
+    det = res["_obs_det"].fillna("") if "_obs_det" in res.columns else ""
+    res["Categoría Novedad"] = (res["_cat_det"].fillna("")
+                                if "_cat_det" in res.columns else "")
+    if isinstance(det, pd.Series):
+        res["Obs. novedad"] = det.where(det.astype(str).str.strip().ne(""), base_obs)
+    elif "Obs. novedad" not in res.columns:
+        res["Obs. novedad"] = ""
+    for c in ("Categoría Novedad", "Obs. novedad", "Estado sede"):
+        if c not in res.columns:
+            res[c] = ""
+        res[c] = res[c].fillna("")
+    res = res.drop(columns=[c for c in ("_cat_det", "_obs_det") if c in res.columns])
+
     res["Novedades del día"] = (pd.to_numeric(res["Novedades del día"], errors="coerce")
                                 .fillna(0).astype(int))
     res["Novedades acumuladas"] = (pd.to_numeric(res["Novedades acumuladas"], errors="coerce")
                                    .fillna(0).astype(int))
+    res["Fecha de corte"] = corte
     return res
 
 
@@ -1017,38 +1079,51 @@ def validar_integridad(d: pd.DataFrame, c: pd.DataFrame, kpi=None, nov=None, cup
             avisos.append(f"⚠️ {len(sob)} oficina(s) programadas sin elementos en Data "
                           f"(revisar si el cronograma incluye equipos no cargados).")
 
-    # --- Campos dashboard / Novedades ---
+    # --- Campos dashboard (estado de sede) y Novedades Equipos (hoja propia) ---
     if kpi is None or getattr(kpi, "empty", True):
-        avisos.append("⚠️ Campos dashboard no disponible: no se integran Categoría Novedad "
-                      "ni el contador diario de novedades.")
+        avisos.append("⚠️ Campos dashboard no disponible: no se integra el estado de la sede.")
+    if nov is None or getattr(nov, "empty", True):
+        avisos.append("⚠️ Novedades Equipos no disponible: no se integran las novedades.")
     else:
-        cat = next((x for x in kpi.columns if "ategoria" in str(x) and "ovedad" in str(x)), None)
-        if cat is None:
-            avisos.append("⚠️ Campos dashboard: no se encontró la columna 'Categoria Novedad'.")
-        else:
-            vals = set(kpi[cat].dropna().astype(str).str.strip())
-            vals.discard("")
-            raros = sorted(vals - {"DENUNCIA", "UBICACION ERRADA", "ADICIONAL", "Ninguna novedad"})
-            if raros:
-                avisos.append(f"⚠️ Categoria Novedad con valores no esperados: {raros[:6]}.")
-    if nov is not None and not getattr(nov, "empty", True):
-        faltan_n = {"Fecha"} - set(nov.columns)
-        if _col(nov, "SBAN PCT", "SBAN") is None:
-            faltan_n.add("SBAN PCT/SBAN")
+        faltan_n = set()
+        if _col(nov, "Fecha") is None:
+            faltan_n.add("Fecha")
+        if _col(nov, "SBAN") is None and _col(nov, "SBAN PCT") is None:
+            faltan_n.add("SBAN/SBAN PCT")
         if _col(nov, "Serial") is None:
             faltan_n.add("Serial")
+        if _col(nov, "Categoria Novedad") is None:
+            faltan_n.add("Categoria Novedad")
         if faltan_n:
             avisos.append("⚠️ Novedades Equipos: faltan columnas " + ", ".join(sorted(faltan_n)) + ".")
         else:
-            col_sb = _col(nov, "SBAN PCT", "SBAN")
-            sb = nov[col_sb] if col_sb else pd.Series(dtype=str)
-            sb = {_pad5(v) for v in sb.dropna()}
+            c_cat = _col(nov, "Categoria Novedad")
+            c_fec = _col(nov, "Fecha")
+            c_ser = _col(nov, "Serial")
+            c_obs = _col(nov, "Observaciones")
+            c_sb = _col(nov, "SBAN") or _col(nov, "SBAN PCT")
+            con_datos = (nov[c_cat].astype(str).str.strip().replace("nan", "").ne("")
+                         | pd.to_datetime(nov[c_fec], errors="coerce").notna()
+                         | nov[c_ser].astype(str).str.strip().replace("nan", "").ne("")
+                         | (nov[c_obs].astype(str).str.strip().replace("nan", "").ne("")
+                            if c_obs else False))
+            n_datos = int(con_datos.sum())
+            vals = set(nov[c_cat].dropna().astype(str).str.strip())
+            vals.discard("")
+            conocidos = {"DENUNCIO", "DENUNCIA", "RECOLECCION", "CAMBIO DE ESTADO A FACTURABLE",
+                         "OPERACION", "UBICACION ERRADA", "ADICIONAL"}
+            raros = sorted(vals - conocidos)
+            if raros:
+                avisos.append(f"⚠️ Categorías de novedad nuevas/no esperadas: {raros[:6]}.")
+            sb = {_pad5(v) for v in nov[c_sb].dropna()}
             sb.discard("")
             en_data = {_pad5(x) for x in pd.to_numeric(d["SBAN"], errors="coerce").dropna().unique()}
             fuera = sorted(sb - en_data)
             if fuera:
                 avisos.append(f"⚠️ Novedades Equipos: {len(fuera)} SBAN sin registro en la Data "
                               f"(ej. {fuera[:5]}).")
+            avisos.append(f"ℹ️ Novedades Equipos: {n_datos} fila(s) con datos de {len(nov)} "
+                          f"(se ignoran {len(nov) - n_datos} vacías).")
 
     # --- Cronograma UPS ---
     if cup is None or getattr(cup, "empty", True):
@@ -1324,6 +1399,73 @@ def render_kpis(datos: pd.DataFrame):
     return total, realizados, pendientes, fact_si, fact_no
 
 
+def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
+                         click_sban=None, kpi_campos=None):
+    """KPIs de oficinas: 100% MT3 por componente y Oficinas Finalizadas (Campos col N)."""
+    b = df
+    if seleccion:
+        b = b[b["_ofi_key"].isin(seleccion)]
+    if f_attr != "T":
+        b = b[b["Facturable"] == f_attr]
+    if click_sban:
+        b = b[b["_SBAN"].eq(click_sban)]
+
+    st.markdown("##### 🏢 Oficinas: mantenimiento completo por componente y finalizadas (Campos)")
+    cols = st.columns(4)
+    for col, (cod, nombre) in zip(cols[:3], [("C1", "Componente 1"),
+                                             ("C2", "Componente 2 (láser)"),
+                                             ("UPS", "UPS")]):
+        sub = b[b["_componente"].eq(cod)] if "_componente" in b.columns else b.iloc[0:0]
+        if sub.empty:
+            col.metric(f"{nombre} · 100% MT3", "0 / 0",
+                       help="Sin datos con los filtros actuales", border=True)
+            continue
+        g = sub.groupby("_SBAN")["_mt"].agg(["size", "sum"])
+        total = int(len(g))
+        intervenidas = int((g["sum"] > 0).sum())
+        completas = int((g["sum"] >= g["size"]).sum())
+        pct = (completas / total * 100) if total else 0.0
+        col.metric(
+            f"{nombre} · oficinas 100% MT3", f"{completas} / {total}",
+            delta=f"{pct:.0f}% completas",
+            help=(f"Oficinas donde TODOS los elementos del componente tienen MT3: {completas} de {total}. "
+                  f"Oficinas con al menos 1 MT3 (intervenidas): {intervenidas}."),
+            border=True,
+        )
+
+    with cols[3]:
+        if kpi_campos is not None and not getattr(kpi_campos, "empty", True):
+            c_est = _col(kpi_campos, "Estado de la sede")
+            c_sb = _col(kpi_campos, "SBAN")
+            kk = kpi_campos.copy()
+            if c_sb:
+                kk["_SBAN"] = kk[c_sb].apply(_pad5)
+                if seleccion:
+                    sbans = {str(s).split(" - ")[0] for s in seleccion}
+                    kk = kk[kk["_SBAN"].isin(sbans)]
+                if click_sban:
+                    kk = kk[kk["_SBAN"].eq(click_sban)]
+            vals = (kk[c_est].fillna("").astype(str).str.strip()
+                    if c_est else pd.Series([], dtype=str))
+            fin = int((vals == "Finalizada").sum())
+            tot = int(len(vals))
+            pct = (fin / tot * 100) if tot else 0.0
+            cols[3].metric(
+                "🏁 Oficinas finalizadas (Campos N)", f"{fin} / {tot}",
+                delta=f"{pct:.0f}% de las sedes",
+                help="Columna N ('Estado de la sede') de Campos dashboard. Cada fila es una sede; "
+                     "'Reprogramada_Finalizada' se contabiliza aparte.",
+                border=True,
+            )
+        else:
+            cols[3].metric("🏁 Oficinas finalizadas (Campos N)", "n/d",
+                           help="Campos dashboard no disponible", border=True)
+
+    st.caption("Componentes = oficinas (SBAN) con **100% de sus elementos en MT3**; el detalle de "
+               "intervenidas está en el tooltip. **Finalizadas** usa la columna N de Campos (no se "
+               "deriva del MT3). Respetan Oficina y el clic del ranking.")
+
+
 # ----------------------------------------------------------------------------
 # Gráficas Plotly
 # ----------------------------------------------------------------------------
@@ -1392,27 +1534,186 @@ def grafico_tendencia(datos: pd.DataFrame):
     serie = d.groupby(d["_f"].dt.date).size().sort_index()
     acum = serie.cumsum()
     x = [f"{f:%d/%m}" for f in serie.index]
+    cel = str(t["celeste"]).lstrip("#")
+    try:
+        rr, gg, bb = int(cel[0:2], 16), int(cel[2:4], 16), int(cel[4:6], 16)
+        relleno = f"rgba({rr},{gg},{bb},0.15)"
+    except (ValueError, IndexError):
+        relleno = "rgba(34,211,238,0.15)"
     fig = go.Figure()
-    fig.add_scatter(x=x, y=serie.values, name="Por día", mode="lines+markers",
-                    line=dict(color=t["celeste"], width=2.5), marker=dict(size=6),
-                    fill="tozeroy",
-                    fillgradient=dict(type="vertical",
-                                      colorscale=[[0, t["celeste"] + "00"], [1, t["celeste"] + "66"]]),
+    fig.add_scatter(x=x, y=serie.values, name="Por día", mode="lines+markers+text",
+                    line=dict(color=t["celeste"], width=2.5), marker=dict(size=7),
+                    text=[str(int(v)) for v in serie.values], textposition="top center",
+                    textfont=dict(size=10, color=t["ink"]), cliponaxis=False,
+                    fill="tozeroy", fillcolor=relleno,
                     hovertemplate="%{x}<br>MT3 del día: %{y}<extra></extra>")
     fig.add_scatter(x=x, y=acum.values, name="Acumulado", mode="lines",
                     line=dict(color=t["verde"], width=2, dash="dot"), yaxis="y2",
                     hovertemplate="%{x}<br>Acumulado: %{y}<extra></extra>")
+    total_d = int(serie.sum())
     fig.update_layout(
-        title=dict(text="<b>Tendencia MT3 (realizados por día)</b>",
+        title=dict(text=f"<b>Tendencia MT3 (realizados por día)</b>"
+                        f"<br><span style='font-size:11px'>Total: {total_d} MT3 · "
+                        f"último día: {x[-1]} ({int(serie.iloc[-1])})</span>",
                    font=dict(size=15, color=t["ink"]), x=0.02),
-        height=340, margin=dict(l=10, r=10, t=55, b=10),
-        xaxis=dict(title="", gridcolor=t["grid"], zeroline=False),
-        yaxis=dict(title="Por día", rangemode="tozero", gridcolor=t["grid"]),
-        yaxis2=dict(title="Acumulado", overlaying="y", side="right", showgrid=False),
+        height=360, margin=dict(l=10, r=10, t=65, b=10),
+        xaxis=dict(title="", gridcolor=t["grid"], zeroline=False,
+                   tickfont=dict(color=t["muted"])),
+        yaxis=dict(title="Por día", rangemode="tozero", gridcolor=t["grid"],
+                   tickfont=dict(color=t["muted"])),
+        yaxis2=dict(title="Acumulado", overlaying="y", side="right", showgrid=False,
+                    tickfont=dict(color=t["muted"])),
         legend=dict(orientation="h", y=1.02, x=0, font=dict(color=t["muted"])),
         **plotly_base(),
     )
     return fig
+
+
+def grafico_mini_componentes(df: pd.DataFrame, seleccion: list, f_attr: str,
+                             click_sban=None):
+    """Barras de cobertura de oficinas con MT3 por componente (solo visual)."""
+    t = tema_actual()
+    b = df
+    if seleccion:
+        b = b[b["_ofi_key"].isin(seleccion)]
+    if f_attr != "T":
+        b = b[b["Facturable"] == f_attr]
+    if click_sban:
+        b = b[b["_SBAN"].eq(click_sban)]
+    nombres, vals, hovers = [], [], []
+    for cod, nombre in (("C1", "Componente 1"), ("C2", "Comp. 2 láser"), ("UPS", "UPS")):
+        sub = b[b["_componente"].eq(cod)] if "_componente" in b.columns else b.iloc[0:0]
+        if sub.empty:
+            nombres.append(nombre); vals.append(0.0); hovers.append("sin datos")
+            continue
+        g = sub.groupby("_SBAN")["_mt"].agg(["size", "sum"])
+        tot = int(len(g))
+        inter = int((g["sum"] > 0).sum())
+        nombres.append(nombre)
+        vals.append(round(inter / tot * 100, 1) if tot else 0.0)
+        hovers.append(f"{inter} de {tot} oficinas")
+    fig = go.Figure(go.Bar(
+        x=vals, y=nombres, orientation="h",
+        text=[f"{v:.0f}%" for v in vals], textposition="inside",
+        marker_color=[t["celeste"], t["ambar"], t["verde"]],
+        customdata=hovers,
+        hovertemplate="<b>%{y}</b><br>Cobertura oficinas: %{x}%<br>%{customdata}<extra></extra>",
+    ))
+    fig.update_layout(
+        title=dict(text="<b>Oficinas con MT3 por componente</b>",
+                   font=dict(size=15, color=t["ink"]), x=0.02),
+        height=250, margin=dict(l=10, r=10, t=45, b=10), showlegend=False,
+        xaxis=dict(range=[0, 100], visible=False),
+        yaxis=dict(autorange="reversed", tickfont=dict(color=t["ink"], size=12)),
+        **plotly_base(),
+    )
+    return fig
+
+
+def grafico_bullet_oficinas(datos: pd.DataFrame):
+    """Barra 100% de oficinas por estado de cobertura del módulo activo."""
+    t = tema_actual()
+    if datos.empty or "_SBAN" not in datos.columns:
+        return None
+    g = datos.groupby("_SBAN")["_mt"].agg(["size", "sum"])
+    comp = int((g["sum"] >= g["size"]).sum())
+    parcial = int(((g["sum"] > 0) & (g["sum"] < g["size"])).sum())
+    cero = int((g["sum"] == 0).sum())
+    fig = go.Figure()
+    for nombre, valor, color in (("Completas", comp, t["verde"]),
+                                 ("En proceso", parcial, t["ambar"]),
+                                 ("Sin iniciar", cero, t["rojo"])):
+        fig.add_bar(y=["Oficinas"], x=[valor], orientation="h", name=nombre,
+                    marker_color=color, text=[f"{nombre}: {valor}"],
+                    textposition="inside", insidetextanchor="middle",
+                    hovertemplate=f"{nombre}: %{{x}} oficinas<extra></extra>")
+    fig.update_layout(
+        title=dict(text="<b>Oficinas por estado de cobertura</b>",
+                   font=dict(size=15, color=t["ink"]), x=0.02),
+        barmode="stack", height=250, margin=dict(l=10, r=10, t=45, b=10),
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        legend=dict(orientation="h", y=-0.05, x=0, font=dict(color=t["muted"])),
+        **plotly_base(),
+    )
+    return fig
+
+
+def grafico_sparkline_tendencia(datos: pd.DataFrame):
+    """Tendencia MT3 por día con valores y ejes visibles (lectura a primera vista)."""
+    t = tema_actual()
+    if "Fecha de mantenimiento 3" not in datos.columns:
+        return None
+    d = datos[datos["_mt"]].copy()
+    d["_f"] = pd.to_datetime(d["Fecha de mantenimiento 3"], errors="coerce")
+    d = d[d["_f"].notna()]
+    if d.empty:
+        return None
+    serie = d.groupby(d["_f"].dt.date).size().sort_index()
+    cel = str(t["celeste"]).lstrip("#")
+    try:
+        rr, gg, bb = int(cel[0:2], 16), int(cel[2:4], 16), int(cel[4:6], 16)
+        relleno = f"rgba({rr},{gg},{bb},0.15)"
+    except (ValueError, IndexError):
+        relleno = "rgba(34,211,238,0.15)"
+    etiquetas = [str(int(v)) for v in serie.values] if len(serie) <= 18 else None
+    fig = go.Figure(go.Scatter(
+        x=[f"{f:%d/%m}" for f in serie.index], y=serie.values,
+        mode="lines+markers+text" if etiquetas else "lines+markers",
+        text=etiquetas, textposition="top center",
+        textfont=dict(size=10, color=t["ink"]),
+        line=dict(color=t["celeste"], width=2), marker=dict(size=7),
+        fill="tozeroy", fillcolor=relleno, cliponaxis=False,
+        hovertemplate="%{x}<br>%{y} MT3<extra></extra>"))
+    total_d = int(serie.sum())
+    fig.update_layout(
+        title=dict(text=f"<b>Tendencia MT3 por día</b>"
+                        f"<br><span style='font-size:11px'>Total: {total_d} MT3 · "
+                        f"último día: {serie.index[-1]:%d/%m} ({int(serie.iloc[-1])})</span>",
+                   font=dict(size=15, color=t["ink"]), x=0.02),
+        height=280, margin=dict(l=10, r=10, t=62, b=10), showlegend=False,
+        xaxis=dict(title="", tickfont=dict(size=10, color=t["muted"]),
+                   gridcolor=t["grid"], zeroline=False),
+        yaxis=dict(title="", rangemode="tozero", tickfont=dict(size=10, color=t["muted"]),
+                   gridcolor=t["grid"]),
+        **plotly_base(),
+    )
+    return fig
+
+
+def render_vista_ejecutiva(filtrado: pd.DataFrame, df: pd.DataFrame, seleccion: list,
+                           f_attr: str, click_sban=None):
+    """Vista solo de KPIs visuales: 5 gráficos, sin tablas ni cifras duras de KPIs."""
+    st.markdown("#### 🎯 Vista ejecutiva · indicadores visuales")
+    cfg = {"displaylogo": False, "modeBarButtonsToRemove": ["lasso2d", "select2d"]}
+    if filtrado.empty:
+        st.info("Sin datos con los filtros actuales.")
+        return
+    realizados = int(filtrado["_mt"].sum())
+    pendientes = int(filtrado["_pendiente"].sum())
+
+    f1a, f1b = st.columns(2)
+    with f1a:
+        st.plotly_chart(grafico_gauge(realizados, pendientes), width="stretch", config=cfg)
+    with f1b:
+        st.plotly_chart(grafico_dona(realizados, pendientes), width="stretch", config=cfg)
+
+    f2a, f2b = st.columns([1.4, 1])
+    with f2a:
+        st.plotly_chart(grafico_mini_componentes(df, seleccion, f_attr, click_sban),
+                        width="stretch", config=cfg)
+    with f2b:
+        figb = grafico_bullet_oficinas(filtrado)
+        if figb is not None:
+            st.plotly_chart(figb, width="stretch", config=cfg)
+        else:
+            st.info("Sin oficinas para mostrar.")
+
+    figs = grafico_sparkline_tendencia(filtrado)
+    if figs is not None:
+        st.plotly_chart(figs, width="stretch", config=cfg)
+    else:
+        st.info("Sin fechas de MT3 para la tendencia.")
 
 
 def _color_en_escala(escala, frac):
@@ -1550,6 +1851,8 @@ ESTADO_COLORES = {
 
 def _color_de_estado(valor):
     texto = str(valor)
+    if "Reprogramada_Finalizada" in texto:
+        return "E4DFEC", "3B2A63"
     for clave in ("Finalizada", "En proceso", "Reprogramada", "Programada"):
         if clave in texto:
             return ESTADO_COLORES[clave]
@@ -1559,6 +1862,8 @@ def _color_de_estado(valor):
 def _badge_estado(valor) -> str:
     """Estado como badge accesible (símbolo + texto), sin depender solo del color."""
     t = str(valor)
+    if "Reprogramada_Finalizada" in t or "Reprogramada / Finalizada" in t:
+        return "🟪 Reprogramada_Finalizada"
     if "Finalizada" in t:
         return "🟩 Finalizada"
     if "En proceso" in t:
@@ -1745,17 +2050,21 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
                     str(nr.get("Obs. novedad", "") or "").strip(),
                 )
         filas = []
-        for key, sub in base.groupby("_ofi_key", sort=True):
+        for key, sub in base.groupby("_SBAN", sort=True):
             total = len(sub)
             subsanados = int(sub["_mt"].sum())
             pendientes = total - subsanados
             avance = (subsanados / total * 100) if total else 0.0
             estados = sorted({str(x) for x in sub["_est_crono"].dropna().tolist() if str(x).strip()})
             sban_ofi = str(sub["_SBAN"].iloc[0])
+            nombres_ofi = [str(x).strip() for x in dict.fromkeys(sub["Oficina"].dropna())
+                           if str(x).strip()]
+            etiqueta_ofi = (" / ".join(nombres_ofi[:2])
+                            + (" …" if len(nombres_ofi) > 2 else "")) or "SIN NOMBRE"
             cat_nov, n_dia, n_acum, obs_nov = nov_lookup.get(sban_ofi, ("", 0, 0, ""))
             filas.append({
                 "SBAN": sban_ofi,
-                "Oficina": sub["Oficina"].iloc[0],
+                "Oficina": etiqueta_ofi,
                 "Estado": _badge_estado(" / ".join(estados) if estados else "Sin cronograma"),
                 "Estado cronograma": " / ".join(estados) if estados else "Sin cronograma",
                 "Total elementos": total,
@@ -1771,8 +2080,12 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
         datos_resumen = res.copy()  # sin fila TOTAL
 
         # ---------------- Filtros intuitivos de la vista ----------------
-        estados_posibles = ["Programada", "En proceso", "Finalizada", "Reprogramada", "Sin cronograma"]
-        presentes = sorted({e for v in datos_resumen["Estado cronograma"] for e in estados_posibles if e in v})
+        estados_posibles = ["Programada", "En proceso", "Finalizada", "Reprogramada",
+                            "Reprogramada_Finalizada", "Sin cronograma"]
+        tokens = {tok.strip() for v in datos_resumen["Estado cronograma"]
+                  for tok in str(v).split("/") if tok.strip()}
+        presentes = ([e for e in estados_posibles if e in tokens]
+                     + [e for e in sorted(tokens) if e not in estados_posibles])
         f1, f2, f3 = st.columns([2.2, 1.6, 1])
         with f1:
             sel_est = st.multiselect("🗂️ Estado cronograma", options=presentes, default=presentes,
@@ -1788,7 +2101,8 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
         vis = datos_resumen.copy()
         vis["% Avance"] = pd.to_numeric(vis["% Avance"], errors="coerce").fillna(0)
         if sel_est:
-            vis = vis[vis["Estado cronograma"].apply(lambda e: any(s in e for s in sel_est))]
+            vis = vis[vis["Estado cronograma"].apply(
+                lambda e: any(t.strip() in sel_est for t in str(e).split("/")))]
         vis = vis[vis["% Avance"] >= min_av]
         if solo_pend:
             vis = vis[vis["% Avance"] < 100.0]
@@ -1802,8 +2116,8 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
                                not in ("nan", "sin novedad", "—")})
             with g1:
                 sel_cat = st.multiselect("🏷️ Categoría Novedad", options=cats_nov,
-                                         default=cats_nov, key="res_catnov",
-                                         placeholder="Todas las categorías")
+                                         default=[], key="res_catnov",
+                                         placeholder="Todas las categorías (sin filtrar)")
             with g2:
                 solo_nov = st.checkbox("Solo novedades del día", key="res_solo_nov")
             if sel_cat:
@@ -2038,14 +2352,20 @@ def main():
     fecha_corte = (nov_norm["_FECHA"].max() if (nov_norm is not None and not nov_norm.empty)
                    else None)
 
-    # Estado por SBAN: prioriza la fuente diaria (Dashboard_KPI, col N) y usa el
-    # cronograma como respaldo.
-    estados_sede = {}
+    # Estado por SBAN: prioriza la fuente diaria (Dashboard_KPI, col N).
+    # Un SBAN puede tener varias filas (Regional/Jefatura/sede); si CUALQUIERA dice
+    # 'Finalizada', la sede se considera finalizada (evita perder jefaturas 01600/06900).
+    estados_por_sban = {}
     if kpi_norm is not None and not kpi_norm.empty and "Estado sede" in kpi_norm.columns:
         for _, fila_k in kpi_norm.iterrows():
             est = str(fila_k.get("Estado sede", "") or "").strip()
             if est:
-                estados_sede[str(fila_k["_SBAN"])] = est
+                estados_por_sban.setdefault(str(fila_k["_SBAN"]), set()).add(est)
+    prioridad = ["Finalizada", "Reprogramada_Finalizada", "En proceso", "Programada"]
+    estados_sede = {}
+    for sban_k, ests in estados_por_sban.items():
+        elegido = next((p for p in prioridad if p in ests), None)
+        estados_sede[sban_k] = elegido or sorted(ests)[0]
 
     def _estado_sban(v):
         if pd.isna(v):
@@ -2149,15 +2469,7 @@ def main():
                        "Revisa el filtro de Oficina o la atribución.")
         st.stop()
 
-    # --- Encabezado hero + KPIs ---
-    scope = "Todas las oficinas" if not seleccion else f"{len(seleccion)} oficina(s)"
-    atrib = {"T": "Todos", "Si": "BANCO (Facturable Si)", "No": "COLSOF (No facturable)"}[f_attr]
-    encabezado_hero(modulo, scope, atrib, len(filtrado), conteos, nov_resumen, fecha_corte)
-
-    # --- Barra VISIBLE de facturación (Opción 1: filtro a la vista + conteos) ---
-    barra_facturacion(df_mod)
-
-    # --- Validación de integridad de los archivos en uso ---
+    # --- Validación de integridad (siempre; detiene si hay críticos) ---
     p_crono_val = ruta_crono_act()
     if p_crono_val.exists():
         criticos, avisos = validar_integridad(
@@ -2171,6 +2483,30 @@ def main():
         for msg in criticos:
             st.error(msg)
         st.stop()
+
+    # --- Selector de vista: Ejecutiva (solo visuales) u Operativa (detalle) ---
+    if hasattr(st, "segmented_control"):
+        vista = st.segmented_control("Vista", ["Operativa", "Ejecutiva"],
+                                     default="Operativa", key="vista_v2")
+    else:
+        vista = st.radio("Vista", ["Operativa", "Ejecutiva"], horizontal=True,
+                         key="vista_v2")
+    vista = vista or "Operativa"
+    if vista == "Ejecutiva":
+        render_vista_ejecutiva(filtrado, df, seleccion, f_attr,
+                               st.session_state.get("click_sban"))
+        st.markdown("---")
+        st.caption(f"Vista Ejecutiva · Módulo {modulo} · 1 fila = 1 elemento (Serial único).")
+        return
+
+    # --- Operativa: encabezado hero + KPIs ---
+    scope = "Todas las oficinas" if not seleccion else f"{len(seleccion)} oficina(s)"
+    atrib = {"T": "Todos", "Si": "BANCO (Facturable Si)", "No": "COLSOF (No facturable)"}[f_attr]
+    encabezado_hero(modulo, scope, atrib, len(filtrado), conteos, nov_resumen, fecha_corte)
+
+    # --- Barra VISIBLE de facturación (Opción 1: filtro a la vista + conteos) ---
+    barra_facturacion(df_mod)
+
     if avisos:
         with st.expander(f"🔍 Validación de integridad — {len(avisos)} aviso(s)",
                          expanded=False):
@@ -2182,6 +2518,7 @@ def main():
 
     # --- KPIs de detalle ---
     render_kpis(filtrado)
+    render_kpis_oficinas(df, seleccion, f_attr, st.session_state.get("click_sban"), kpi_campos)
     avance_filtro = float(filtrado["_mt"].mean() * 100) if len(filtrado) else 0.0
 
     # --- Filtros activos (chips con X) ---
@@ -2208,7 +2545,7 @@ def main():
                 grafico_gauge(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
                 width="stretch", config=cfg_chart)
 
-        fila2a, fila2b = st.columns([1.4, 1])
+        fila2a, fila2b = st.columns([1, 1.3])
         with fila2a:
             top_n = st.segmented_control("Sedes a mostrar en el ranking",
                                          options=[5, 10, 12, 15, 20, 25], default=12,

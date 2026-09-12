@@ -15,3 +15,4 @@ venv/
 
 # Configuración local con secretos (modo_admin, modo_publico) — NO subir
 .streamlit/secrets.toml
+.gstack/

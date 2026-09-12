@@ -2,7 +2,7 @@
 uploads/
 __pycache__/
 *.pyc
-app_backup_componente1_*.py
+app_backup_*.py
 *.log
 
 # Respaldos y artefactos que no se despliegan

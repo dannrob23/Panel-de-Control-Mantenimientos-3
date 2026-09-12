@@ -91,15 +91,17 @@ html, body, .stApp, [class*="css"] { font-family: 'Inter', system-ui, sans-serif
 h1, h2, h3, h4 { color: __INK__ !important; font-weight: 800 !important; letter-spacing: -.4px; }
 p, li, label { color: __INK__ !important; }
 [data-testid="stCaptionContainer"] p, .stCaption, small { color: __MUTED__ !important; }
+/* --- Tarjetas KPI (detalle y resumen): mismo lenguaje visual que las destacadas --- */
 [data-testid="stMetric"] { background: __CARD__ !important; border: 1px solid __BORDER__ !important;
-  border-radius: 14px; padding: 12px 12px; box-shadow: __SOMBRA__; }
+  border-radius: 16px; padding: 14px 15px 13px; box-shadow: __SOMBRA__; }
 [data-testid="stMetricValue"] { color: __INK__ !important; font-weight: 800 !important;
-  font-size: 1.4rem !important; letter-spacing: -.6px;
+  font-size: 1.45rem !important; letter-spacing: -1.1px;
   white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important; }
 [data-testid="stMetricValue"] > div, [data-testid="stMetricValue"] > span {
   white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important; }
-[data-testid="stMetricLabel"] p { color: __MUTED__ !important; font-weight: 600 !important;
-  font-size: .76rem !important; white-space: normal !important; overflow: visible !important;
+[data-testid="stMetricLabel"] p { color: __MUTED__ !important; font-weight: 700 !important;
+  font-size: .70rem !important; letter-spacing: .7px !important; text-transform: uppercase;
+  white-space: normal !important; overflow: visible !important;
   text-overflow: clip !important; line-height: 1.2 !important; }
 .stButton > button { border-radius: 10px !important; border: 1px solid __BORDER__ !important;
   background: __CARD__ !important; color: __INK__ !important; font-weight: 600 !important; }
@@ -2493,6 +2495,8 @@ def main():
                          key="vista_v2")
     vista = vista or "Operativa"
     if vista == "Ejecutiva":
+        # Mismo bloque de KPIs principales que la vista operativa (lenguaje visual unificado)
+        tarjetas_destacadas(filtrado)
         render_vista_ejecutiva(filtrado, df, seleccion, f_attr,
                                st.session_state.get("click_sban"))
         st.markdown("---")

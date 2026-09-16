@@ -97,13 +97,19 @@ streamlit run app.py            # http://localhost:8501
 El flujo **que publica** en la web es el publicador (no el uploader del panel):
 
 1. Copiar los `.xlsx` del día (Data, Cronograma, Campos) en la carpeta hermana
-   **`..\Ingesta de datos diaria`**.
-2. Doble clic en **`ingesta_publicar.bat`** → copia los archivos a `data/`, escribe la **fecha/hora**
-   en `ultima_actualizacion.json` y hace `git commit/push`.
+   **`..\Ingesta de datos diaria`**. El **Campos dashboard** debe traer la hoja `Dashboard_KPI`
+   con la columna **AP «ESTADO UPS»** y la hoja `Novedades Equipos`.
+2. Doble clic en **`ingesta_publicar.bat`** (dentro de `deploy_panel/`) → sincroniza `app.py` y la
+   documentación desde la raíz, **anonimiza** los datos a `data/`, escribe la **fecha/hora** en
+   `ultima_actualizacion.json` y hace `git commit/push`.
 3. Streamlit Cloud redespliega (1-2 min) y el panel muestra el nuevo `🕒 Última actualización`.
 
 > ⚠️ El **uploader** de la barra lateral (modo admin) sirve para *ver* datos en local, **no publica**.
 > Además, en Streamlit Cloud el disco es efímero: lo subido por esa vía se pierde en el próximo reinicio.
+
+> 🔎 Si el `push` falla por credenciales de GitHub (`SEC_E_NO_CREDENTIALS`), abre Git Bash/CMD,
+> ejecuta `git -C deploy_panel push origin main` e introduce tu usuario y token una vez; los commits
+> ya quedan hechos y solo falta subirlos.
 
 ---
 
@@ -129,6 +135,10 @@ data/                      Excel vigentes + ultima_actualizacion.json
 uploads/                   (ignorado por git) archivos subidos por el uploader + bitácora
 requirements.txt           streamlit · pandas · openpyxl · plotly
 ```
+
+`deploy_panel/` es el repositorio que se publica en Streamlit Cloud (tiene su propio git y su
+`data/`). Ahí vive **`sincronizar_app.py`**, que copia `app.py`, `README.md` y `TUTORIAL.md` desde la
+raíz del proyecto antes de publicar, para que la nube reciba exactamente la versión probada en local.
 
 ---
 

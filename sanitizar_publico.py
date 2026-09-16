@@ -68,15 +68,20 @@ def sanear_data(df: pd.DataFrame) -> pd.DataFrame:
 
 def sanear_campos(path: Path):
     kpi = pd.read_excel(path, sheet_name="Dashboard_KPI")
-    nov = pd.read_excel(path, sheet_name="Novedades Equipos")
+    try:
+        nov = pd.read_excel(path, sheet_name="Novedades Equipos")
+    except Exception:  # noqa: BLE001
+        nov = pd.DataFrame()
+    # 'ESTADO UPS' (col AP) se conserva: es el avance de las UPS que muestra el panel.
     kcols = ["SBAN", "Tipo", "Nombre Oficina", "Fecha Inicio", "Fecha Fin",
-             "Estado de la sede", "Categoria  Novedad"]
+             "Estado de la sede", "ESTADO UPS", "Categoria  Novedad"]
     kpi = kpi[[c for c in kcols if c in kpi.columns]].copy()
     if "Categoria  Novedad" in kpi.columns:
         kpi["Categoria  Novedad"] = kpi["Categoria  Novedad"].fillna("").astype(str).str.strip()
     ncols = {"SBAN": "SBAN", "SBAN PCT": "SBAN PCT", "Fecha": "Fecha",
              "Serial ": "Serial ", "Estado": "Estado", "Facturable": "Facturable",
-             "Nombre Oficina": "Nombre Oficina", "Categoria  Novedad": "Categoria  Novedad"}
+             "Nombre Oficina": "Nombre Oficina", "Departamento": "Departamento",
+             "ALIADO": "ALIADO", "Categoria  Novedad": "Categoria  Novedad"}
     nov = nov[[c for c in ncols if c in nov.columns]].copy()
     for c in list(nov.columns):
         if str(c).strip().lower() == "serial":

@@ -399,6 +399,16 @@ def _tipo_archivo(path) -> str:
     return ""
 
 
+def _archivo_mas_reciente(carpeta: Path, tipo: str) -> Path | None:
+    """Devuelve el .xlsx más reciente del tipo dado en la carpeta."""
+    if not carpeta.exists():
+        return None
+    archivos = [p for p in carpeta.glob("*.xlsx") if _tipo_archivo(p) == tipo]
+    if not archivos:
+        return None
+    return max(archivos, key=lambda p: p.stat().st_mtime)
+
+
 def _tipo_archivo_bytes(data: bytes) -> str:
     try:
         xl = pd.ExcelFile(io.BytesIO(data))
@@ -428,7 +438,7 @@ def _mtime_carpeta(p: Path) -> float:
         return 0.0
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner="Descubriendo ingesta diaria…")
 def _descubrir_ingesta(clave: str, mtime: float, carpetas: tuple) -> dict:
     """Toma el .xlsx más reciente de cada tipo dentro de las carpetas de ingesta."""
     out = {}
@@ -436,12 +446,10 @@ def _descubrir_ingesta(clave: str, mtime: float, carpetas: tuple) -> dict:
         carpeta = Path(cp)
         if not carpeta.exists():
             continue
-        archivos = sorted(carpeta.glob("*.xlsx"),
-                          key=lambda p: p.stat().st_mtime, reverse=True)
-        for p in archivos:
-            t = _tipo_archivo(p)
-            if t and t not in out:
-                out[t] = str(p)
+        for tipo in ("data", "crono", "crono_ups", "campos"):
+            arch = _archivo_mas_reciente(carpeta, tipo)
+            if arch and tipo not in out:
+                out[tipo] = str(arch)
     out.setdefault("data", str(RUTA_XLSX) if RUTA_XLSX.exists() else "")
     out.setdefault("crono", str(RUTA_CRONO) if RUTA_CRONO.exists() else "")
     out.setdefault("crono_ups", "")
@@ -802,26 +810,42 @@ def _col(df, *nombres):
     return None
 
 
-def preparar_campos(kpi, nov, df=None):
-    """Normaliza Dashboard_KPI (estado/observaciones) y Novedades Equipos (por SBAN).
+_PRIO_UPS = ["Finalizado", "Finalizada", "En proceso", "En ejecución", "Programado",
+             "Programada", "No aplica", "Pendiente"]
 
-    Las novedades ahora viven en la hoja 'Novedades Equipos' e incluyen su propia
+
+def preparar_campos(kpi, nov, df=None):
+    """Normaliza Dashboard_KPI (estado de la sede, ESTADO UPS, observaciones) y Novedades Equipos (por SBAN).
+
+    Las novedades viven en la hoja 'Novedades Equipos' e incluyen su propia
     columna 'Categoria Novedad' (ya no viene en Dashboard_KPI).
+    El avance de UPS se toma TAL CUAL de la columna AP «ESTADO UPS» de
+    Dashboard_KPI (Banco Agrario + COLSOF en el mismo documento): no se deriva.
     Amarre por SBAN (5 dígitos) con respaldo en SBAN PCT.
     Asigna `_comp` (C1/C2/UPS) para que las novedades no se trasladen entre módulos.
     """
-    k = pd.DataFrame(columns=["_SBAN", "Estado sede", "Obs. novedad"])
+    k = pd.DataFrame(columns=["_SBAN", "Estado sede", "Estado UPS", "Obs. novedad",
+                              "Obs. UPS", "Fuente UPS"])
     if kpi is not None and not kpi.empty:
         est = _col(kpi, "Estado de la sede")
+        ups = _col(kpi, "ESTADO UPS")
         obs = _col(kpi, "Observaciones actas PCT")
+        obs_ups = _col(kpi, "OBSERVACIONES")
         sban = kpi[_col(kpi, "SBAN")] if _col(kpi, "SBAN") else pd.Series(dtype=str)
         k = pd.DataFrame({
             "_SBAN": sban.apply(_pad5),
             "Estado sede": (kpi[est].fillna("").astype(str).str.strip()
                             if est else pd.Series([""] * len(kpi))),
+            "Estado UPS": (kpi[ups].fillna("").astype(str).str.strip()
+                           if ups else pd.Series([""] * len(kpi))),
             "Obs. novedad": (kpi[obs].fillna("").astype(str).str.strip()
                              if obs else pd.Series([""] * len(kpi))),
+            "Obs. UPS": (kpi[obs_ups].fillna("").astype(str).str.strip()
+                         if obs_ups else pd.Series([""] * len(kpi))),
         })
+        # Declara el origen del avance UPS: la columna AP del archivo (no se deriva).
+        k["Fuente UPS"] = ("Campos dashboard · col AP «ESTADO UPS»" if ups
+                           else "Campos dashboard sin columna «ESTADO UPS»")
         k = k[k["_SBAN"].astype(str).str.len() > 0]
 
         # Un SBAN puede tener varias filas (Regional/Jefatura/sede): se agrupa con
@@ -835,8 +859,27 @@ def preparar_campos(kpi, nov, df=None):
                     return p
             return sorted(vals)[0] if vals else ""
 
+        def _prio_ups(serie):
+            """Estado UPS de la sede (col AP). Prioriza el avance más adelantado."""
+            vals = {str(x).strip() for x in serie if str(x).strip()}
+            for p in _PRIO_UPS:
+                if p in vals:
+                    return p
+            return sorted(vals)[0] if vals else ""
+
+        def _ultimo_lleno(serie):
+            """Última observación no vacía (evita perder texto en filas secundarias)."""
+            for x in reversed(list(serie)):
+                if str(x).strip() and str(x).strip().lower() != "nan":
+                    return str(x).strip()
+            return ""
+
         k = (k.groupby("_SBAN", as_index=False)
-              .agg({"Estado sede": _prio_estado, "Obs. novedad": "last"}))
+              .agg({"Estado sede": _prio_estado,
+                    "Estado UPS": _prio_ups,
+                    "Obs. novedad": _ultimo_lleno,
+                    "Obs. UPS": _ultimo_lleno,
+                    "Fuente UPS": _ultimo_lleno}))
 
     n = pd.DataFrame()
     if nov is not None and not nov.empty:
@@ -911,7 +954,8 @@ def resumen_novedades(k, n):
     """Contador por SBAN: categoría (última novedad), del día y acumulado."""
     if n is None or n.empty:
         base = (k.copy() if (k is not None and not k.empty)
-                else pd.DataFrame(columns=["_SBAN", "Estado sede", "Obs. novedad"]))
+                else pd.DataFrame(columns=["_SBAN", "Estado sede", "Estado UPS",
+                                           "Obs. novedad", "Obs. UPS"]))
         if "Categoría Novedad" not in base.columns:
             base["Categoría Novedad"] = ""
         if "Obs. novedad" not in base.columns:
@@ -955,7 +999,7 @@ def resumen_novedades(k, n):
         res["Obs. novedad"] = det.where(det.astype(str).str.strip().ne(""), base_obs)
     elif "Obs. novedad" not in res.columns:
         res["Obs. novedad"] = ""
-    for c in ("Categoría Novedad", "Obs. novedad", "Estado sede"):
+    for c in ("Categoría Novedad", "Obs. novedad", "Estado sede", "Estado UPS", "Obs. UPS"):
         if c not in res.columns:
             res[c] = ""
         res[c] = res[c].fillna("")
@@ -979,6 +1023,324 @@ def clasificar_componente(df: pd.DataFrame) -> pd.Series:
     comp[laser] = "C2"
     comp[ups] = "UPS"
     return comp
+
+
+# ----------------------------------------------------------------------------
+# Avance UPS: columna AP «ESTADO UPS» de Campos dashboard (fuente autoritativa)
+# ----------------------------------------------------------------------------
+def normalizar_estado_ups(v) -> str:
+    """Lleva los textos de la columna AP a los 4 estados del panel."""
+    t = str(v).strip()
+    if not t or t.lower() in ("nan", "none"):
+        return ""
+    tl = t.lower()
+    if tl.startswith("finaliz"):
+        return "Finalizada"
+    if tl.startswith("reprogram"):
+        return "Reprogramada"
+    if tl.startswith("en proceso") or tl.startswith("en ejec"):
+        return "En proceso"
+    if tl.startswith("program"):
+        return "Programada"
+    return t
+
+
+def tabla_avance_ups(k, df) -> pd.DataFrame:
+    """Cruza el ESTADO UPS de Campos (col AP) con el conteo de UPS de la Data.
+
+    Columnas: SBAN · Oficina · Regional · UPS en Data · UPS con MT3 · Avance MT3 ·
+    ESTADO UPS (col AP) · Observación UPS · Alerta.
+    """
+    vacio = pd.DataFrame(columns=["SBAN", "Oficina", "Regional", "UPS en Data",
+                                  "UPS con MT3", "Avance MT3 %", "Estado UPS",
+                                  "Estado UPS normalizado", "Observación UPS", "Alerta"])
+    if k is None or getattr(k, "empty", True):
+        return vacio
+    ups = (df[df["_componente"].eq("UPS")].copy() if "_componente" in df.columns
+           else df.iloc[0:0].copy())
+    if "_SBAN" not in ups.columns and "SBAN" in ups.columns:
+        ups["_SBAN"] = ups["SBAN"].apply(_pad5)
+    if "_mt" not in ups.columns:
+        ups["_mt"] = False
+    if "Oficina" not in ups.columns:
+        ups["Oficina"] = ""
+    if len(ups):
+        def _moda(s):
+            v = s.dropna()
+            m = v.mode() if len(v) else v
+            return m.iloc[0] if len(m) else ""
+
+        g = (ups.groupby("_SBAN")
+                .agg(**{"UPS en Data": ("Serial", "size"), "UPS con MT3": ("_mt", "sum")})
+                .reset_index())
+        g["Oficina"] = (ups.groupby("_SBAN")["Oficina"].agg(_moda)
+                        .reindex(g["_SBAN"]).values)
+        reg = _col(ups, "Regional")
+        g["Regional"] = (ups.groupby("_SBAN")[reg].agg(_moda).reindex(g["_SBAN"]).values
+                         if reg else "")
+    else:
+        g = pd.DataFrame(columns=["_SBAN", "UPS en Data", "UPS con MT3", "Oficina", "Regional"])
+
+    t = k.copy()
+    t["_SBAN"] = t["_SBAN"].apply(_pad5)
+    if "Estado UPS" not in t.columns:
+        t["Estado UPS"] = ""
+    if "Obs. UPS" not in t.columns:
+        t["Obs. UPS"] = ""
+    for c in ("Oficina", "Regional"):
+        if c not in t.columns:
+            t[c] = ""
+    t = t[["_SBAN", "Oficina", "Regional", "Estado UPS", "Obs. UPS"]]
+    if len(g):
+        g = g.rename(columns={"Oficina": "Oficina Data", "Regional": "Regional Data"})
+    res = t.merge(g, on="_SBAN", how="left")
+    if "Oficina Data" in res.columns:
+        ofi_k = res["Oficina"].fillna("").astype(str).str.strip()
+        res["Oficina"] = ofi_k.where(ofi_k.ne(""), res["Oficina Data"].fillna(""))
+        reg_k = res["Regional"].fillna("").astype(str).str.strip()
+        res["Regional"] = reg_k.where(reg_k.ne(""), res["Regional Data"].fillna(""))
+        res = res.drop(columns=["Oficina Data", "Regional Data"])
+    elif "Oficina" not in res.columns:
+        res["Oficina"] = ""
+    if "Regional" not in res.columns:
+        res["Regional"] = ""
+    for c in ("UPS en Data", "UPS con MT3"):
+        res[c] = pd.to_numeric(res.get(c), errors="coerce").fillna(0).astype(int)
+    res["Avance MT3 %"] = ((res["UPS con MT3"] / res["UPS en Data"] * 100)
+                           .where(res["UPS en Data"] > 0, 0.0).round(1))
+    res["Estado UPS normalizado"] = res["Estado UPS"].apply(normalizar_estado_ups)
+
+    fin = res["Estado UPS normalizado"].eq("Finalizada")
+    con_datos = res["UPS en Data"] > 0
+    res["Alerta"] = ""
+    res.loc[fin & con_datos & res["UPS con MT3"].lt(res["UPS en Data"]), "Alerta"] = (
+        "⚠️ Marca Finalizado pero hay UPS sin MT3 en la Data")
+    res.loc[~fin & con_datos & res["UPS con MT3"].ge(res["UPS en Data"]), "Alerta"] = (
+        "ℹ️ Todos los UPS con MT3 pero la col AP no dice Finalizado")
+    res["SBAN"] = res["_SBAN"]
+    res = res.rename(columns={"Obs. UPS": "Observación UPS"})
+    return res[["SBAN", "Oficina", "Regional", "UPS en Data", "UPS con MT3", "Avance MT3 %",
+                "Estado UPS", "Estado UPS normalizado", "Observación UPS", "Alerta"]]
+
+
+def render_avance_ups(k, df, seleccion=None):
+    """Panel del avance UPS con el ESTADO UPS (col AP) como fuente principal."""
+    st.markdown("#### 🔋 Avance de UPS (columna AP «ESTADO UPS» de Campos dashboard)")
+    if k is None or getattr(k, "empty", True):
+        st.info("Este archivo de **Campos dashboard** todavía no trae la hoja `Dashboard_KPI` "
+                "con la columna **ESTADO UPS**. Cárgala para ver el avance de las UPS aquí.")
+        return
+    t = tabla_avance_ups(k, df)
+    if seleccion:
+        sbans = {str(s).split(" - ")[0] for s in seleccion}
+        t = t[t["SBAN"].isin(sbans)]
+    if t.empty:
+        st.info("Sin sedes para los filtros seleccionados.")
+        return
+
+    total = len(t)
+    reportadas = int(t["Estado UPS normalizado"].astype(str).str.strip().ne("").sum())
+    fin = int(t["Estado UPS normalizado"].eq("Finalizada").sum())
+    proc = int(t["Estado UPS normalizado"].eq("En proceso").sum())
+    prog = int(t["Estado UPS normalizado"].eq("Programada").sum())
+    sin_rep = total - reportadas
+    alertas = int((t["Alerta"].astype(str).str.strip() != "").sum())
+    pct = (fin / total * 100) if total else 0.0
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("🔋 Sedes con UPS (col AP)", f"{reportadas} / {total}",
+              help="Sedes del archivo Campos dashboard para las que la columna AP trae "
+                   "algún valor en ESTADO UPS.", border=True)
+    c2.metric("✅ UPS finalizadas (col AP)", f"{fin}",
+              delta=f"{pct:.0f}% de las sedes", border=True,
+              help="Filas de la columna AP con 'Finalizado'.")
+    c3.metric("🟨 En proceso · ⬜ Programadas", f"{proc} · {prog}",
+              help="Conteo de la columna AP en los demás estados.", border=True)
+    c4.metric("⚪ Sin reporte en col AP", f"{sin_rep}",
+              delta=f"{alertas} alerta(s)" if alertas else None,
+              delta_color="inverse", border=True,
+              help="Sedes sin dato en ESTADO UPS. Las alertas cruzan la col AP con el "
+                   "conteo de UPS y MT3 de la Data.")
+
+    orden = {"Finalizada": 0, "En proceso": 1, "Programada": 2, "Reprogramada": 3}
+    t = t.assign(_o=t["Estado UPS normalizado"].map(orden).fillna(9),
+                 _rep=t["Estado UPS normalizado"].astype(str).str.strip().eq(""))
+    t = t.sort_values(["_rep", "_o", "SBAN"]).drop(columns=["_o", "_rep"]).reset_index(drop=True)
+
+    vista = t.copy()
+    vista["Estado UPS (col AP)"] = vista["Estado UPS"].apply(
+        lambda v: _badge_estado(normalizar_estado_ups(v)) if str(v).strip() else "⚪ Sin reporte")
+    vista["Oficina"] = vista["Oficina"].fillna("").astype(str)
+    cols_vista = ["SBAN", "Oficina", "UPS en Data", "UPS con MT3", "Avance MT3 %",
+                  "Estado UPS (col AP)", "Observación UPS", "Alerta"]
+    if MODO_PUBLICO:
+        vista["Observación UPS"] = ""
+    st.dataframe(
+        vista[cols_vista], hide_index=True, width="stretch", height=430,
+        column_config={
+            "SBAN": st.column_config.TextColumn("SBAN", width="small"),
+            "Oficina": st.column_config.TextColumn("Oficina", width="medium"),
+            "UPS en Data": st.column_config.NumberColumn("UPS en Data", width="small"),
+            "UPS con MT3": st.column_config.NumberColumn("UPS con MT3", width="small"),
+            "Avance MT3 %": st.column_config.ProgressColumn(
+                "Avance MT3 %", min_value=0, max_value=100, format="%.0f%%", width="small"),
+            "Estado UPS (col AP)": st.column_config.TextColumn(
+                "Estado UPS (col AP)", width="small",
+                help="Valor textual de la columna AP del archivo Campos dashboard."),
+            "Observación UPS": st.column_config.TextColumn(
+                "Observación UPS", width="large",
+                help="Columna AQ «OBSERVACIONES» del archivo Campos dashboard."),
+            "Alerta": st.column_config.TextColumn(
+                "Alerta", width="medium",
+                help="Cruce entre la col AP y el avance real de UPS en la Data."),
+        },
+    )
+    c1, c2 = st.columns(2)
+    c1.download_button(
+        "⬇️ Descargar avance UPS (CSV)", width="stretch",
+        data=vista[cols_vista].to_csv(index=False).encode("utf-8-sig"),
+        file_name="avance_ups_estado_colAP.csv", mime="text/csv")
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        vista[cols_vista].to_excel(writer, index=False, sheet_name="Avance UPS")
+    c2.download_button(
+        "⬇️ Descargar avance UPS (Excel)", width="stretch",
+        data=buf.getvalue(), file_name="avance_ups_estado_colAP.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.caption("El estado de cada sede se lee **tal cual** de la columna AP "
+               "«ESTADO UPS» del archivo Campos dashboard. Las columnas de conteo y "
+               "% vienen de la Data y sirven de control cruzado (no cambian el estado).")
+
+
+def render_novedades_oficinas(n, seleccion=None, fecha_corte=None):
+    """Pestaña de novedades de las oficinas (hoja 'Novedades Equipos')."""
+    st.markdown("## 📰 Novedades de las oficinas")
+    st.caption("Novedades reportadas por las oficinas, tomadas de la hoja "
+               "**Novedades Equipos** del archivo Campos dashboard. "
+               "Una fila = una novedad (serial, estado y observación).")
+    if n is None or getattr(n, "empty", True):
+        st.info("El archivo **Campos dashboard** no trae novedades de oficina "
+                "(hoja `Novedades Equipos`) para este módulo. "
+                "Cárgalo desde **📂 Ingesta diaria** en la barra lateral.")
+        return
+
+    d = n.copy()
+    if seleccion and "_SBAN" in d.columns:
+        sbans = {str(s).split(" - ")[0] for s in seleccion}
+        d = d[d["_SBAN"].astype(str).isin(sbans)]
+    if d.empty:
+        st.info("Sin novedades para las oficinas seleccionadas.")
+        return
+
+    d["_Fecha"] = pd.to_datetime(d["_FECHA"], errors="coerce")
+    d["_Cat"] = (d["Categoría Novedad"].fillna("").astype(str).str.strip()
+                 if "Categoría Novedad" in d.columns else "")
+
+    cats = sorted({c for c in d["_Cat"] if c and c.lower() != "nan"})
+    k1, k2, k3 = st.columns([2.2, 1.4, 1])
+    sel_cat = k1.multiselect("🏷️ Categoría de la novedad", options=cats, default=cats,
+                             key="nov_ofi_cat", placeholder="Todas las categorías")
+    fechas = d["_Fecha"].dropna()
+    if len(fechas):
+        f_min, f_max = fechas.min().date(), fechas.max().date()
+        rango = k2.date_input("📅 Rango de fechas", value=(f_min, f_max),
+                              min_value=f_min, max_value=f_max, key="nov_ofi_fecha")
+        if isinstance(rango, tuple) and len(rango) == 2:
+            ini, fin = pd.Timestamp(rango[0]), pd.Timestamp(rango[1])
+            d = d[d["_Fecha"].isna() | d["_Fecha"].between(ini, fin)]
+    k3.metric("Novedades visibles", f"{len(d):,}".replace(",", "."), border=True)
+
+    if sel_cat:
+        d = d[d["_Cat"].isin(sel_cat)]
+    if d.empty:
+        st.info("Ninguna novedad coincide con los filtros.")
+        return
+
+    acomodo = {"DENUNCIO": 0, "DENUNCIA": 0, "RECOLECCION": 1,
+               "CAMBIO DE ESTADO A FACTURABLE": 2}
+    d = d.assign(_o=d["_Cat"].map(acomodo).fillna(5),
+                 _f=d["_Fecha"].fillna(pd.Timestamp("1900-01-01")))
+    d = d.sort_values(["_f", "_o"], ascending=[False, True]).drop(columns=["_o", "_f"])
+
+    vista = pd.DataFrame({
+        "SBAN": d["_SBAN"].astype(str),
+        "Oficina": (d["Nombre Oficina"].fillna("").astype(str)
+                    if "Nombre Oficina" in d.columns else ""),
+        "Fecha": d["_Fecha"].dt.strftime("%Y-%m-%d").fillna(""),
+        "Regional": (d["Departamento"].fillna("").astype(str)
+                     if "Departamento" in d.columns else ""),
+        "Aliado": (d["ALIADO"].fillna("").astype(str) if "ALIADO" in d.columns else ""),
+        "Categoría": d["_Cat"],
+        "Estado del equipo": (d["Estado novedad"].fillna("").astype(str)
+                              if "Estado novedad" in d.columns else ""),
+        "Facturable": (d["Facturable novedad"].fillna("").astype(str)
+                       if "Facturable novedad" in d.columns else ""),
+        "Serial": (d["_Serial"].astype(str) if "_Serial" in d.columns else ""),
+        "Observación": (d["Obs. novedad detalle"].fillna("").astype(str)
+                        if "Obs. novedad detalle" in d.columns else ""),
+    })
+    if MODO_PUBLICO:
+        vista["Serial"] = vista["Serial"].apply(_mask_serial)
+        vista["Observación"] = ""
+    vista = vista[~vista["Serial"].astype(str).str.lower().isin(["", "nan"]) | vista["Categoría"].ne("")]
+    vista = vista.reset_index(drop=True)
+
+    t = tema_actual()
+    por_cat = (vista.assign(_u=1).groupby("Categoría", dropna=False)["_u"].sum()
+               .sort_values(ascending=False))
+    tot_hoja = len(n) if n is not None else 0
+    txt_nov = f"**{len(vista):,}** novedad(es) con datos"
+    if tot_hoja:
+        txt_nov += f" de **{tot_hoja:,}** filas de la hoja `Novedades Equipos`"
+    txt_nov += (" (las filas sin categoría, fecha, serial ni observación se descartan).")
+    st.caption(txt_nov.replace(",", "."))
+    fig = go.Figure(go.Bar(
+        x=[int(v) for v in por_cat.values], y=[str(i) for i in por_cat.index],
+        orientation="h", marker=dict(color=t["primario"]),
+        text=[int(v) for v in por_cat.values], textposition="outside",
+        cliponaxis=False,
+        hovertemplate="<b>%{y}</b><br>%{x} novedad(es)<extra></extra>",
+    ))
+    fig.update_layout(
+        title=dict(text="<b>Novedades por categoría</b>", font=dict(size=15, color=t["ink"]),
+                   x=0.02),
+        height=max(240, 34 * len(por_cat) + 110), margin=dict(l=10, r=30, t=55, b=10),
+        showlegend=False, **plotly_base())
+    st.plotly_chart(fig, width="stretch",
+                    config={"displaylogo": False,
+                            "modeBarButtonsToRemove": ["lasso2d", "select2d"]})
+
+    st.markdown(f"##### Detalle de novedades ({len(vista):,})".replace(",", "."))
+    st.dataframe(vista, hide_index=True, width="stretch", height=460,
+                 column_config={
+                     "SBAN": st.column_config.TextColumn("SBAN", width="small"),
+                     "Oficina": st.column_config.TextColumn("Oficina", width="medium"),
+                     "Fecha": st.column_config.TextColumn("Fecha", width="small"),
+                     "Regional": st.column_config.TextColumn("Departamento", width="small"),
+                     "Aliado": st.column_config.TextColumn("Aliado", width="small"),
+                     "Categoría": st.column_config.TextColumn("Categoría", width="medium"),
+                     "Estado del equipo": st.column_config.TextColumn("Estado del equipo",
+                                                                     width="small"),
+                     "Facturable": st.column_config.TextColumn("Facturable", width="small"),
+                     "Serial": st.column_config.TextColumn("Serial", width="medium"),
+                     "Observación": st.column_config.TextColumn("Observación", width="large"),
+                 })
+    c1, c2 = st.columns(2)
+    c1.download_button(
+        "⬇️ Descargar novedades (CSV)", width="stretch",
+        data=vista.to_csv(index=False).encode("utf-8-sig"),
+        file_name="novedades_oficinas.csv", mime="text/csv")
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        vista.to_excel(writer, index=False, sheet_name="Novedades oficinas")
+        por_cat.rename("Novedades").to_frame().to_excel(writer, sheet_name="Por categoría")
+    c2.download_button(
+        "⬇️ Descargar novedades (Excel)", width="stretch",
+        data=buf.getvalue(), file_name="novedades_oficinas.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    if fecha_corte is not None and pd.notna(fecha_corte):
+        st.caption(f"Fecha de corte de las novedades: **{pd.Timestamp(fecha_corte):%Y-%m-%d}** "
+                   f"· {len(vista):,} novedad(es) mostradas.".replace(",", "."))
 
 
 # ----------------------------------------------------------------------------
@@ -1066,9 +1428,25 @@ def validar_integridad(d: pd.DataFrame, c: pd.DataFrame, kpi=None, nov=None, cup
 
     # --- Campos dashboard (estado de sede) y Novedades Equipos (hoja propia) ---
     if kpi is None or getattr(kpi, "empty", True):
-        avisos.append("⚠️ Campos dashboard no disponible: no se integra el estado de la sede.")
+        avisos.append("⚠️ Campos dashboard no disponible: no se integra el estado de la sede "
+                      "ni el avance de UPS.")
+    elif _col(kpi, "ESTADO UPS") is None:
+        avisos.append("⚠️ Campos dashboard: falta la columna **ESTADO UPS** (col AP); "
+                      "la pestaña de avance UPS quedará sin estado por sede.")
+    else:
+        c_ups = _col(kpi, "ESTADO UPS")
+        vals_ups = kpi[c_ups].fillna("").astype(str).str.strip()
+        n_ups = int(vals_ups.ne("").sum())
+        raros_ups = sorted({v for v in vals_ups.unique() if v and v not in
+                            ("Finalizado", "Finalizada", "En proceso", "Programada",
+                             "Programado", "Reprogramada", "No aplica")})
+        avisos.append(f"ℹ️ Campos dashboard · ESTADO UPS (col AP): {n_ups} sede(s) con estado "
+                      f"reportado de {len(kpi)} fila(s).")
+        if raros_ups:
+            avisos.append(f"⚠️ ESTADO UPS: valores nuevos/no esperados: {raros_ups[:6]}.")
     if nov is None or getattr(nov, "empty", True):
-        avisos.append("⚠️ Novedades Equipos no disponible: no se integran las novedades.")
+        avisos.append("⚠️ Novedades Equipos no disponible: la pestaña «Novedades de las "
+                      "oficinas» quedará vacía.")
     else:
         faltan_n = set()
         if _col(nov, "Fecha") is None:
@@ -2323,10 +2701,26 @@ def main():
 
     seleccion, solo_pendientes, f_attr = render_sidebar(df, cod_mod)
 
-    # UPS: estado de sede derivado del cronograma UPS (fecha + avance en MT)
-    if cod_mod == "UPS" and crono_ups is not None and not crono_ups.empty:
-        est_ups = estados_ups(df, crono_ups)
-        df["_est_crono"] = df["_SBAN"].map(est_ups).fillna("Sin cronograma")
+    # UPS: el avance por sede viene de la columna AP «ESTADO UPS» del archivo Campos
+    # dashboard (Banco Agrario + COLSOF en el mismo documento). Solo si ese archivo no
+    # trae la columna, se usa como respaldo el cronograma UPS (fecha + avance en MT).
+    ups_fuente = ""
+    if cod_mod == "UPS":
+        if kpi_norm is not None and not kpi_norm.empty and "Estado UPS" in kpi_norm.columns:
+            mapa_ups = {str(r["_SBAN"]): normalizar_estado_ups(r.get("Estado UPS"))
+                        for _, r in kpi_norm.iterrows()}
+            con_dato = {s: e for s, e in mapa_ups.items() if str(e).strip()}
+            if con_dato:
+                df["_est_ups"] = df["_SBAN"].map(mapa_ups).fillna("")
+                df["_est_crono"] = df["_SBAN"].map(mapa_ups).fillna("")
+                sin_rep = df["_est_crono"].astype(str).str.strip().eq("")
+                df.loc[sin_rep, "_est_crono"] = "Sin cronograma"
+                ups_fuente = "Campos dashboard · col AP «ESTADO UPS»"
+        if not ups_fuente and crono_ups is not None and not crono_ups.empty:
+            est_ups = estados_ups(df, crono_ups)
+            df["_est_crono"] = df["_SBAN"].map(est_ups).fillna("Sin cronograma")
+            df["_est_ups"] = df["_SBAN"].map(est_ups).fillna("")
+            ups_fuente = "Cronograma UPS (respaldo: fecha + avance MT3)"
 
     df_mod = df[df["_componente"].eq(cod_mod)].copy()
     conteos = df["_componente"].value_counts().to_dict()
@@ -2432,18 +2826,31 @@ def main():
     st.progress(min(max(avance_filtro / 100.0, 0.0), 1.0),
                 text=f"Avance MT3 del filtro actual: {avance_filtro:.1f}%".replace(".", ","))
 
+    if cod_mod == "UPS" and ups_fuente:
+        st.caption(f"🔋 Avance de UPS leído de: **{ups_fuente}**.")
+
     # --- Filtros activos (chips con X) ---
     barra_filtros_activos(seleccion, solo_pendientes, f_attr,
                           st.session_state.get("click_sban"))
 
-    # --- Pestañas: Gráficos · Resumen por oficina · Gestión de novedades ---
+    # --- Pestañas: Gráficos · Resumen por oficina · Avance UPS · Novedades · Gestión ---
     cfg_chart = {"displaylogo": False,
                  "modeBarButtonsToRemove": ["lasso2d", "select2d"]}
     cfg_sel = {"displaylogo": False,
                "modeBarButtonsToRemove": ["lasso2d", "select2d", "zoom2d", "pan2d"]}
 
-    tab_graf, tab_res, tab_nov = st.tabs(
-        ["📈 Gráficos y avance", "🏢 Resumen por oficina", "📋 Gestión de novedades"])
+    nombres_tabs = ["📈 Gráficos y avance", "🏢 Resumen por oficina"]
+    if cod_mod == "UPS":
+        nombres_tabs.append("🔋 Avance UPS (col AP)")
+    nombres_tabs += ["📰 Novedades de las oficinas", "📋 Gestión de novedades"]
+    tabs = st.tabs(nombres_tabs)
+    tab_graf, tab_res = tabs[0], tabs[1]
+    i = 2
+    tab_ups = None
+    if cod_mod == "UPS":
+        tab_ups = tabs[i]
+        i += 1
+    tab_nov_ofi, tab_nov = tabs[i], tabs[i + 1]
 
     with tab_graf:
         fila1a, fila1b = st.columns([1, 1])
@@ -2489,6 +2896,15 @@ def main():
     with tab_res:
         # Resumen por oficina (Total / Subsanados / Pendientes / % Avance / Novedades)
         render_resumen(base_oficina, seleccion, f_attr, nov_resumen)
+
+    if tab_ups is not None:
+        with tab_ups:
+            render_avance_ups(kpi_norm, df, seleccion)
+
+    with tab_nov_ofi:
+        # Novedades de las oficinas: TODAS (no se aísla por módulo, porque una novedad
+        # de oficina —denuncio, recolección, cambio a facturable— es transversal).
+        render_novedades_oficinas(nov_norm, seleccion, fecha_corte)
 
     with tab_nov:
         # Tabla de gestión de novedades

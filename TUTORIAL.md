@@ -46,6 +46,7 @@ Muestra, en tiempo real y de forma visual:
 │  [📦 Total] [✅ MT] [⚠️ Pendientes] [🏦 Facturables] [🏢 No fact.]   │  ← tarjetas KPI
 │                                                                       │
 │  📈 Gráficos y avance │ 🏢 Resumen por oficina │ 📋 Gestión novedades │  ← pestañas
+│  (con el módulo UPS se agregan: 🔋 Avance UPS (col AP) · 📰 Novedades de las oficinas)
 └──────────────────────────────────────────────────────────────────────┘
    ☰ Barra lateral: Datos · Filtros · Auditoría y fuentes
 ```
@@ -76,6 +77,10 @@ Muestra, en tiempo real y de forma visual:
 - Al cambiar de módulo, **los filtros se reinician solos** (para no dejarte una vista vacía sin explicación).
 - **Regla de negocio:** las impresoras láser (Componente 2) se **facturan al Banco**, aunque el archivo de
   origen venga marcado como "No". El panel lo aplica y te lo avisa con el chip `ℹ️ Impresoras: facturables (Si)`.
+- **Avance de las UPS:** en el módulo **UPS** el estado de cada sede se toma **tal cual** de la columna
+  **AP «ESTADO UPS»** del archivo **Campos dashboard** (`Finalizado`, `En proceso`, `Programada`…).
+  El panel **no lo calcula ni lo estima**: solo lo muestra, junto al conteo de UPS y su avance MT3
+  (que sirve de control cruzado).
 
 ---
 
@@ -112,7 +117,7 @@ y la barra de **Avance MT3 del filtro actual**.
 
 ---
 
-## 7. Las 3 pestañas
+## 7. Las pestañas
 
 ### 📈 Gráficos y avance
 - **Dona**: subsanados vs. pendientes
@@ -126,6 +131,27 @@ Tabla con una fila por sede: `SBAN · Oficina · Estado · Total · Subsanados �
 Categoría novedad · Nov. del día · Nov. acumuladas`, más una fila de **totales**.
 Tiene sus **propios filtros** (estado del cronograma, avance mínimo, categoría de novedad, solo novedades del día)
 y el botón **⬇️ Descargar Excel** (vista filtrada + gráficos + novedades).
+
+### 🔋 Avance UPS (col AP) — solo en el módulo UPS
+Panel del avance de las UPS tomado de la **columna AP «ESTADO UPS»** del archivo Campos dashboard:
+
+| Indicador | Qué mide |
+|---|---|
+| 🔋 **Sedes con UPS (col AP)** | Sedes que traen algún valor en esa columna |
+| ✅ **UPS finalizadas (col AP)** | Sedes marcadas `Finalizado` (y su % sobre el total) |
+| 🟨 **En proceso · ⬜ Programadas** | Conteo de los demás estados de la columna AP |
+| ⚪ **Sin reporte en col AP** | Sedes sin dato + número de **alertas** |
+
+La tabla muestra `SBAN · Oficina · UPS en Data · UPS con MT3 · Avance MT3 % · Estado UPS (col AP) ·
+Observación UPS · Alerta`. Las **alertas** cruzan la columna AP con la Data (por ejemplo, una sede que dice
+`Finalizado` pero todavía tiene UPS sin MT3). Puedes **descargar** el panel en CSV o Excel.
+
+### 📰 Novedades de las oficinas — en todos los módulos
+Novedades reportadas por las oficinas (hoja **Novedades Equipos** del archivo Campos dashboard):
+`SBAN · Oficina · Fecha · Departamento · Aliado · Categoría · Estado del equipo · Facturable · Serial · Observación`.
+Trae un gráfico de **novedades por categoría**, filtros de **categoría** y **rango de fechas**, y descarga en CSV/Excel.
+A diferencia de la tabla de gestión, aquí las novedades **no se separan por componente** (una novedad de oficina
+es transversal: denuncio, recolección, cambio a facturable…).
 
 ### 📋 Gestión de novedades
 Tabla **editable**: escribe directamente en la columna **Observaciones / Novedades**.
@@ -171,7 +197,8 @@ Sin ese archivo, el panel se ve como la vista pública (solo consulta).
 
 ### Flujo correcto de publicación (paso a paso)
 1. Guarda los Excel del día (Data, Cronograma, Campos) en la carpeta **`Ingesta de datos diaria`**
-   (hermana del proyecto).
+   (hermana del proyecto). El archivo **Campos dashboard** debe traer la hoja `Dashboard_KPI` con la
+   columna **AP «ESTADO UPS»** y la hoja `Novedades Equipos` (novedades de las oficinas).
 2. Doble clic en **`ingesta_publicar.bat`** → copia, actualiza la fecha/hora y sube a GitHub.
 3. Espera 1-2 minutos y recarga la página pública con **Ctrl+F5**: la fecha del chip `🕒` debe cambiar.
 

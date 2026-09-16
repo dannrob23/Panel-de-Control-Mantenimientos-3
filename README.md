@@ -20,7 +20,14 @@ novedades por sede y fecha/hora de última actualización.
 - **Chips de estado** en el encabezado: módulo, operatividad, fecha de datos, filtro de facturación activo,
   regla de impresoras, datos desactualizados y modo público.
 - **Encabezado (hero)** con la vista actual y los totales base; **tarjetas KPI** con desglose de facturación.
-- **3 pestañas**: 📈 Gráficos y avance · 🏢 Resumen por oficina · 📋 Gestión de novedades.
+- **Pestañas**: 📈 Gráficos y avance · 🏢 Resumen por oficina · 📋 Gestión de novedades; en el módulo **UPS**
+  se agrega **🔋 Avance UPS (col AP)** y siempre está disponible **📰 Novedades de las oficinas**.
+- **Avance de las UPS desde la columna AP «ESTADO UPS»** del archivo *Campos dashboard* (Banco Agrario y
+  COLSOF integrados en el mismo documento): indicadores de sedes reportadas / finalizadas / en proceso /
+  programadas / sin reporte, tabla por sede con el avance MT3 de las UPS y **alertas de control cruzado**
+  (por ejemplo, sede marcada `Finalizado` con UPS sin MT3). Descarga CSV/Excel.
+- **Novedades de las oficinas** en una pestaña propia (hoja `Novedades Equipos`), con gráfico por categoría,
+  filtros de categoría y rango de fechas, y exportación; no se aíslan por componente porque son transversales.
 - **Gráficos (Plotly)**: dona, taquímetro de avance, ranking de sedes con más pendientes (clic para filtrar),
   tendencia diaria y mapa de calor Regional × Estado.
 - **Resumen por oficina** con filtros propios, fila de totales y **descarga a Excel** (vista + gráficos + novedades).
@@ -130,6 +137,12 @@ requirements.txt           streamlit · pandas · openpyxl · plotly
 - **Impresoras láser (Componente 2) = facturables (Si).** El Excel de origen las trae como "No", por lo que
   el panel aplica la regla con la constante `IMPRESORAS_FACTURABLES` (en `app.py`) y lo anuncia con el chip
   `ℹ️ Impresoras: facturables (Si)`. **Pendiente:** corregirlo también en el archivo de origen.
+- **Avance de UPS = columna AP «ESTADO UPS» de Campos dashboard.** Es la fuente autoritativa: el panel la
+  muestra tal cual (normalizando `Finalizado → Finalizada`) y **no la deriva** del cronograma. Solo si el
+  archivo no trae esa columna se usa el respaldo del cronograma UPS (`FECHA` + avance MT3, `estados_ups()`).
+- **Novedades de oficina = hoja `Novedades Equipos`** (categoría, fecha, serial, estado y observación).
+  El cruce con la Data es por **Serial** y, si no aparece, por texto de la observación; el resumen por sede
+  se amarra por **SBAN** (respaldo `SBAN PCT`).
 - **Subsanado** = tiene consecutivo MT3 · **Pendiente** = no lo tiene.
 - Al cambiar de módulo se reinician los filtros que podrían dejar la vista vacía.
 

@@ -141,8 +141,9 @@ def _escribir_metadata():
     except Exception:  # noqa: BLE001
         pass
     try:
-        meta["filas_novedades"] = int(len(pd.read_excel(DATA / "Campos_actual.xlsx",
-                                                        sheet_name="Novedades Equipos").dropna(how="all")))
+        nov_pub = pd.read_excel(DATA / "Campos_actual.xlsx", sheet_name="Novedades Equipos")
+        # Se descartan las filas totalmente vacías: es lo que muestra el panel.
+        meta["filas_novedades"] = int(len(nov_pub.dropna(how="all")))
     except Exception:  # noqa: BLE001
         pass
     (DATA / "ultima_actualizacion.json").write_text(

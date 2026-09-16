@@ -1,0 +1,49 @@
+# -*- coding: utf-8 -*-
+"""Despliega en deploy_panel/ la app y la documentación de la raíz del proyecto.
+
+Se ejecuta desde deploy_panel/ingesta_publicar.bat antes de publicar, para que el
+panel de Streamlit Cloud reciba siempre la misma versión de `app.py` que se prueba
+en local. Normaliza los finales de línea a LF (evita diffs falsos en git).
+"""
+import shutil
+import sys
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parent
+ORIGEN = BASE.parent
+
+ARCHIVOS = {
+    "app.py": "app.py",
+    "README.md": "README.md",
+    "TUTORIAL.md": "TUTORIAL.md",
+}
+
+
+def main() -> int:
+    cambios = 0
+    for origen_nombre, destino_nombre in ARCHIVOS.items():
+        origen = ORIGEN / origen_nombre
+        destino = BASE / destino_nombre
+        if not origen.exists():
+            print(f"[AVISO] No existe {origen}; se omite.")
+            continue
+        texto = origen.read_text(encoding="utf-8").replace("\r\n", "\n")
+        actual = (destino.read_text(encoding="utf-8").replace("\r\n", "\n")
+                  if destino.exists() else None)
+        if actual == texto:
+            print(f"= {destino_nombre}: ya estaba al día")
+            continue
+        respaldo = None
+        if destino.exists():
+            respaldo = destino.with_suffix(destino.suffix + ".bak")
+            shutil.copy2(destino, respaldo)
+        destino.write_text(texto, encoding="utf-8", newline="\n")
+        cambios += 1
+        print(f"↑ {origen_nombre} -> deploy_panel/{destino_nombre}"
+              + (f" (respaldo: {respaldo.name})" if respaldo else ""))
+    print(f"Sincronización terminada: {cambios} archivo(s) actualizado(s).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

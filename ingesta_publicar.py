@@ -6,6 +6,8 @@ actualización. Opcionalmente hace commit y push al repositorio de GitHub.
 Uso:
     python ingesta_publicar.py            # copia + metadatos + git push
     python ingesta_publicar.py --no-push  # solo copia + metadatos
+    python ingesta_publicar.py --no-copy  # publica lo ya presente en data/ (tras
+                                          # haberlo anonimizado con sanitizar_publico.py)
 """
 import hashlib
 import json
@@ -64,22 +66,42 @@ def _git(args) -> int:
     return subprocess.call(["git"] + args, cwd=str(BASE))
 
 
-def main(push: bool = True) -> int:
-    tipos = _elegir()
-    if "data" not in tipos:
-        print("[ERROR] No encontré una Data válida (hoja Hoja1) en:", ORIGEN)
-        return 1
+def _meta_desde_data() -> dict:
+    """Metadatos a partir de lo que ya está en data/ (modo --no-copy)."""
     info = {}
     for t, destino in DESTINOS.items():
-        if t not in tipos:
+        p = DATA / destino
+        if not p.exists():
             continue
-        origen = Path(tipos[t])
-        destino_path = DATA / destino
-        shutil.copy2(origen, destino_path)
-        sha = hashlib.sha256(destino_path.read_bytes()).hexdigest()
-        info[t] = {"archivo_origen": origen.name, "archivo": destino,
-                   "sha256": sha, "bytes": destino_path.stat().st_size}
-        print(f"OK {t}: {origen.name} -> {destino}")
+        info[t] = {"archivo": destino,
+                   "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+                   "bytes": p.stat().st_size}
+        print(f"OK {t}: {destino} (ya presente en data/)")
+    return info
+
+
+def main(push: bool = True, copiar: bool = True) -> int:
+    if copiar:
+        tipos = _elegir()
+        if "data" not in tipos:
+            print("[ERROR] No encontré una Data válida (hoja Hoja1) en:", ORIGEN)
+            return 1
+        info = {}
+        for t, destino in DESTINOS.items():
+            if t not in tipos:
+                continue
+            origen = Path(tipos[t])
+            destino_path = DATA / destino
+            shutil.copy2(origen, destino_path)
+            sha = hashlib.sha256(destino_path.read_bytes()).hexdigest()
+            info[t] = {"archivo_origen": origen.name, "archivo": destino,
+                       "sha256": sha, "bytes": destino_path.stat().st_size}
+            print(f"OK {t}: {origen.name} -> {destino}")
+    else:
+        info = _meta_desde_data()
+        if not info:
+            print("[ERROR] No hay archivos en data/ para publicar:", DATA)
+            return 1
 
     meta = {"fecha_hora": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
             "archivos": info}
@@ -90,8 +112,10 @@ def main(push: bool = True) -> int:
         pass
     try:
         if (DATA / "Campos_actual.xlsx").exists():
-            meta["filas_novedades"] = int(len(pd.read_excel(DATA / "Campos_actual.xlsx",
-                                                            sheet_name="Novedades Equipos")))
+            # Se descartan las filas totalmente vacías: es lo que muestra el panel.
+            nov_pub = pd.read_excel(DATA / "Campos_actual.xlsx",
+                                    sheet_name="Novedades Equipos").dropna(how="all")
+            meta["filas_novedades"] = int(len(nov_pub))
     except Exception:  # noqa: BLE001
         pass
     (DATA / "ultima_actualizacion.json").write_text(
@@ -114,4 +138,5 @@ def main(push: bool = True) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(push="--no-push" not in sys.argv))
+    sys.exit(main(push="--no-push" not in sys.argv,
+                  copiar="--no-copy" not in sys.argv))

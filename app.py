@@ -307,12 +307,15 @@ def f_attr_seleccionado() -> str:
     return "T"
 
 
-def barra_facturacion(df_mod: pd.DataFrame):
+def barra_facturacion(df_mod: pd.DataFrame, mostrar_conteos: bool = True):
     """Barra VISIBLE de facturación (Opción 1 de usabilidad).
 
     Píldoras siempre a la vista en el área principal (no escondidas en el sidebar),
-    con la opción activa resaltada y los conteos debajo. En módulos de una sola
-    categoría se informa con una etiqueta en lugar de ofrecer opciones inútiles.
+    con la opción activa resaltada. En módulos de una sola categoría se informa con
+    una etiqueta en lugar de ofrecer opciones inútiles.
+
+    `mostrar_conteos=False` cuando las tarjetas KPI ya muestran esos conteos (evita
+    repetir la misma cifra dos veces en pantalla).
     """
     if df_mod is None or getattr(df_mod, "empty", True) or "Facturable" not in df_mod.columns:
         return
@@ -326,7 +329,8 @@ def barra_facturacion(df_mod: pd.DataFrame):
     if n_si == 0 or n_no == 0:
         st.session_state.pop("seg_fact", None)   # nunca deja la vista vacía
         cual = "Facturable (BANCO)" if n_si else "No facturable (COLSOF)"
-        st.info(f"ℹ️ Este módulo es **100% {cual}** — {fmt(n_tot)} equipos. No requiere filtro.")
+        extra = f" — {fmt(n_tot)} equipos" if mostrar_conteos else ""
+        st.info(f"ℹ️ Este módulo es **100% {cual}**{extra}. No requiere filtro.")
         return
 
     st.segmented_control(
@@ -335,8 +339,9 @@ def barra_facturacion(df_mod: pd.DataFrame):
         default="Todos", key="seg_fact",
         help="Filtra el tablero por atribución de facturación (columna 'Facturable').",
     )
-    st.caption(f"📊 Del módulo ({fmt(n_tot)} equipos): 🏦 Facturables {fmt(n_si)} · "
-               f"🏢 No facturables {fmt(n_no)}")
+    if mostrar_conteos:
+        st.caption(f"📊 Del módulo ({fmt(n_tot)} equipos): 🏦 Facturables {fmt(n_si)} · "
+                   f"🏢 No facturables {fmt(n_no)}")
 
 
 def barra_filtros_activos(seleccion, solo_pendientes, f_attr, click_sban):
@@ -1124,18 +1129,23 @@ def tabla_avance_ups(k, df) -> pd.DataFrame:
 
 
 def render_avance_ups(k, df, seleccion=None):
-    """Panel del avance UPS con el ESTADO UPS (col AP) como fuente principal."""
+    """Panel del avance UPS con el ESTADO UPS (col AP) como fuente principal.
+
+    Solo se listan las sedes que **tienen UPS en la Data**, para que el total, la
+    cobertura y el control de MT3 hablen del mismo conjunto de oficinas.
+    """
     st.markdown("#### 🔋 Avance de UPS (columna AP «ESTADO UPS» de Campos dashboard)")
     if k is None or getattr(k, "empty", True):
         st.info("Este archivo de **Campos dashboard** todavía no trae la hoja `Dashboard_KPI` "
                 "con la columna **ESTADO UPS**. Cárgala para ver el avance de las UPS aquí.")
         return
     t = tabla_avance_ups(k, df)
+    t = t[t["UPS en Data"] > 0]          # mismo universo que el resto de indicadores UPS
     if seleccion:
         sbans = {str(s).split(" - ")[0] for s in seleccion}
         t = t[t["SBAN"].isin(sbans)]
     if t.empty:
-        st.info("Sin sedes para los filtros seleccionados.")
+        st.info("Sin sedes con UPS para los filtros seleccionados.")
         return
 
     total = len(t)
@@ -1144,53 +1154,58 @@ def render_avance_ups(k, df, seleccion=None):
     proc = int(t["Estado UPS normalizado"].eq("En proceso").sum())
     prog = int(t["Estado UPS normalizado"].eq("Programada").sum())
     sin_rep = total - reportadas
-    alertas = int((t["Alerta"].astype(str).str.strip() != "").sum())
     pct = (fin / total * 100) if total else 0.0
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🔋 Sedes con UPS (col AP)", f"{reportadas} / {total}",
-              help="Sedes del archivo Campos dashboard para las que la columna AP trae "
-                   "algún valor en ESTADO UPS.", border=True)
-    c2.metric("✅ UPS finalizadas (col AP)", f"{fin}",
-              delta=f"{pct:.0f}% de las sedes", border=True,
-              help="Filas de la columna AP con 'Finalizado'.")
-    c3.metric("🟨 En proceso · ⬜ Programadas", f"{proc} · {prog}",
-              help="Conteo de la columna AP en los demás estados.", border=True)
-    c4.metric("⚪ Sin reporte en col AP", f"{sin_rep}",
-              delta=f"{alertas} alerta(s)" if alertas else None,
-              delta_color="inverse", border=True,
-              help="Sedes sin dato en ESTADO UPS. Las alertas cruzan la col AP con el "
-                   "conteo de UPS y MT3 de la Data.")
-
-    # --- Conciliación con la métrica «oficinas 100% MT3» (fuente distinta) ---
+    # --- Conciliación con el control de MT3 (fuente distinta) ---
     con_ups = t["UPS en Data"] > 0
     cien_mt3 = con_ups & t["UPS con MT3"].ge(t["UPS en Data"])
     fin_ap = t["Estado UPS normalizado"].eq("Finalizada")
     ambos = int((fin_ap & cien_mt3).sum())
     solo_ap = int((fin_ap & ~cien_mt3).sum())
     solo_mt3 = int((~fin_ap & cien_mt3).sum())
-    with st.expander("❓ ¿Por qué «UPS finalizadas (col AP)» y «oficinas 100% MT3» "
-                     "no dan el mismo número?", expanded=False):
+    n_cien = int(cien_mt3.sum())
+    n_con_ups = int(con_ups.sum())
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("🔋 Cobertura col AP", f"{reportadas} / {total}",
+              delta=f"{sin_rep} sin dato", delta_color="off", border=True,
+              help="Sedes **con UPS en la Data** que ya traen algún valor en la columna AP "
+                   "«ESTADO UPS». Las demás están en blanco: la oficina todavía no marca su avance.")
+    c2.metric("✅ UPS finalizadas (col AP)", f"{fin}",
+              delta=f"{pct:.0f}% de las sedes con UPS", border=True,
+              help="Estado OFICIAL del avance UPS: filas de la columna AP con 'Finalizado'.")
+    c3.metric("🟨 En proceso · ⬜ Programadas", f"{proc} · {prog}",
+              help="Conteo de la columna AP en los demás estados. " + (f"Sin dato: {sin_rep}."
+                   if sin_rep else "Todas las sedes tienen dato."), border=True)
+    c4.metric("⚠️ Diferencias AP vs MT3", f"{solo_ap + solo_mt3}",
+              delta_color="inverse" if (solo_ap + solo_mt3) else "off",
+              border=True,
+              help="Sedes donde la columna AP (oficial) y el control de MT3 calculado con la Data "
+                   "no coinciden. El detalle está en el desplegable de conciliación.")
+
+    with st.expander("❓ Conciliación: columna AP (oficial) vs control MT3 de la Data",
+                     expanded=False):
         ejemplos_ap = ", ".join(t.loc[fin_ap & ~cien_mt3, "SBAN"].astype(str).tolist()[:6]) or "—"
         st.markdown(
             f"""
-Las dos cifras vienen de **archivos distintos** y miden **cosas distintas**:
+Las dos cifras vienen de **archivos distintos** y no miden lo mismo. La **columna AP es el
+estado oficial**; el conteo de MT3 es un **control** que calcula el panel con la Data:
 
-| Métrica | Fuente | Qué cuenta | Valor de hoy |
-|---|---|---|---|
-| **UPS finalizadas (col AP)** | *Campos dashboard*, columna **AP** | Sedes que la oficina reportó como `Finalizado` | **{fin}** |
-| **UPS · oficinas 100% MT3** | *Data de ejecución* (`16 sept.xlsx`) | Sedes donde **todos** los UPS cargados tienen consecutivo MT3 | **{int(cien_mt3.sum())}** |
+| Fuente | Qué cuenta | Valor |
+|---|---|---|
+| **Campos dashboard · columna AP** (oficial) | Sedes que la oficina reportó como `Finalizado` | **{fin}** |
+| **Campos dashboard · columna AP** (cobertura) | Sedes con algún dato en la columna (de {total}) | **{reportadas}** |
+| **Data de ejecución** (control MT3) | Sedes donde **todos** los UPS cargados tienen consecutivo MT3 | **{n_cien}** |
 
-Al cruzar sede por sede:
+Al cruzar sede por sede ({n_con_ups} sedes con UPS en la Data):
 
 - ✅ Coinciden en **{ambos}** sedes.
 - ⚠️ La col AP dice `Finalizado` pero **falta MT3** en **{solo_ap}** sede(s){f" (ej. {ejemplos_ap})" if solo_ap else ""}.
-- ℹ️ Están al **100% MT3** pero la col AP **no dice** `Finalizado`: **{solo_mt3}** sede(s) (aparecen en la columna **Alerta** de la tabla de abajo).
-- El resto de sedes (**{sin_rep}**) todavía **no tiene el dato** registrado en la columna AP: la oficina aún no lo ha marcado.
+- ℹ️ Están al **100% MT3** pero la col AP **no dice** `Finalizado`: **{solo_mt3}** sede(s) (aparecen en la columna **Alerta** de la tabla).
+- ⚪ **{sin_rep}** sede(s) todavía **no tienen el dato** en la columna AP: la oficina aún no lo ha marcado.
 
-> 💡 La **columna AP es el estado oficial**. El conteo de MT3 es un **control** que hace el panel
-> con la Data: sirve para detectar esas diferencias (por eso aparecen las alertas), no para
-> reemplazar el estado reportado.
+> 💡 Por eso el indicador principal es **{fin}** (columna AP) y el control de MT3 (**{n_cien}**)
+> solo se usa para detectar estas diferencias, no para reemplazar el estado reportado.
 """
         )
         detalle = t.loc[(fin_ap & ~cien_mt3) | (~fin_ap & cien_mt3),
@@ -1298,7 +1313,9 @@ def render_novedades_oficinas(n, seleccion=None, fecha_corte=None):
         if isinstance(rango, tuple) and len(rango) == 2:
             ini, fin = pd.Timestamp(rango[0]), pd.Timestamp(rango[1])
             d = d[d["_Fecha"].isna() | d["_Fecha"].between(ini, fin)]
-    k3.metric("Novedades visibles", f"{len(d):,}".replace(",", "."), border=True)
+    k3.metric("Novedades mostradas", f"{len(d):,}".replace(",", "."), border=True,
+              help="Novedades que cumplen los filtros de categoría y fechas de esta pestaña. "
+                   "Los totales por oficina están en la pestaña 🏢 Resumen por oficina.")
 
     if sel_cat:
         d = d[d["_Cat"].isin(sel_cat)]
@@ -1715,17 +1732,26 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
 # Métricas KPI
 # ----------------------------------------------------------------------------
 def render_kpis(datos: pd.DataFrame):
+    """Tarjetas KPI del filtro activo (módulo + sidebar + clic del ranking).
+
+    Es la ÚNICA fuente de los conteos de equipos: el resto de vistas no los repite.
+    El % de avance va como delta de la tarjeta de MT (antes se repetía en una barra).
+    """
     total = len(datos)
     realizados = int(datos["_mt"].sum())
     pendientes = int(datos["_pendiente"].sum())
     fact_si = int((datos["Facturable"] == "Si").sum())
     fact_no = int((datos["Facturable"] == "No").sum())
+    avance = (realizados / total * 100) if total else 0.0
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("📦 Total de elementos", f"{total:,}".replace(",", "."),
-              help="Equipos en la(s) oficina(s) seleccionada(s)", border=True)
+              help="Equipos del módulo activo que cumplen los filtros (Oficina · Facturación · "
+                   "solo pendientes · clic del ranking).", border=True)
     c2.metric("✅ Mantenimientos realizados (MT)", f"{realizados:,}".replace(",", "."),
-              help="Filas cuyo 'Consecutivo mantenimiento 3' empieza por MT", border=True)
+              delta=f"{avance:.1f}% de avance".replace(".", ","),
+              help="Filas cuyo 'Consecutivo mantenimiento 3' empieza por MT. El delta es el avance "
+                   "del filtro actual (realizados ÷ total).", border=True)
     c3.metric("⚠️ Mantenimientos pendientes", f"{pendientes:,}".replace(",", "."),
               delta=f"{pendientes/total*100:.1f}%" if total else "0%",
               delta_color="inverse", help="Total de elementos − Realizados", border=True)
@@ -1733,16 +1759,28 @@ def render_kpis(datos: pd.DataFrame):
               help="Elementos atribuibles a BANCO", border=True)
     c5.metric("🏢 No facturables (No)", f"{fact_no:,}".replace(",", "."),
               help="Elementos de gestión COLSOF", border=True)
-    st.caption(
-        f"Facturación del filtro actual — BANCO (Si): **{fact_si:,}** · "
-        f"COLSOF (No): **{fact_no:,}** · Total: **{total:,}**".replace(",", ".")
-    )
     return total, realizados, pendientes, fact_si, fact_no
 
 
 def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
-                         click_sban=None, kpi_campos=None):
-    """KPIs de oficinas: 100% MT3 por componente y Oficinas Finalizadas (Campos col N)."""
+                         click_sban=None, kpi_campos=None, cod_mod="C1",
+                         solo_pendientes=False):
+    """Tarjetas de OFICINAS, todas con el mismo universo y los mismos filtros.
+
+    Universo = oficinas de Campos dashboard (una fila por SBAN, 806). Las 5 tarjetas
+    aplican los MISMOS filtros (Oficina · Facturación 🏦/🏢 · clic del ranking ·
+    solo pendientes) y **no** dependen del módulo activo, para que sus cifras sean
+    siempre comparables y no cambien al cambiar de pestaña de módulo.
+
+    - 3 tarjetas de componente: oficinas **con el componente** y cuántas están al
+      **100% MT3**. El tooltip dice cuántas quedan fuera por los filtros y cuántas
+      oficinas tiene el archivo (806).
+    - `🏁 Oficinas finalizadas (Campos N)`: columna N del archivo, por SBAN único.
+    - `🔋 UPS finalizadas (col AP)`: fuente OFICIAL del avance UPS, columna AP.
+
+    `cod_mod` se recibe para documentar el módulo activo, pero las cifras se calculan
+    para los 3 componentes siempre (así no cambian al cambiar de módulo).
+    """
     b = df
     if seleccion:
         b = b[b["_ofi_key"].isin(seleccion)]
@@ -1750,35 +1788,66 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
         b = b[b["Facturable"] == f_attr]
     if click_sban:
         b = b[b["_SBAN"].eq(click_sban)]
+    if solo_pendientes and "_pendiente" in b.columns:
+        b = b[b["_pendiente"]]
 
-    st.markdown("##### 🏢 Oficinas: mantenimiento completo por componente y finalizadas (Campos)")
+    # Universo único: oficinas (SBAN) de Campos dashboard
+    if kpi_campos is not None and not getattr(kpi_campos, "empty", True) \
+            and _col(kpi_campos, "SBAN"):
+        sban_campos = kpi_campos[_col(kpi_campos, "SBAN")].apply(_pad5)
+        sban_campos = sban_campos[sban_campos.astype(str).str.len() > 0]
+        universo = set(sban_campos)
+    else:
+        universo = set(df["_SBAN"].astype(str))
+    n_universo = len(universo)
+    n_filtro = len({s for s in b["_SBAN"].astype(str)} & universo) if len(b) else 0
+    n_datos = len(set(df["_SBAN"].astype(str)))
+
+    etiqueta_filtro = {"T": "Todas las oficinas",
+                       "Si": "filtro 🏦 Facturables (BANCO)",
+                       "No": "filtro 🏢 No facturables (COLSOF)"}.get(f_attr, "Todas las oficinas")
+    if seleccion:
+        etiqueta_filtro += f" · {len(seleccion)} oficina(s) seleccionada(s)"
+    if click_sban:
+        etiqueta_filtro += f" · sede {click_sban}"
+    if solo_pendientes:
+        etiqueta_filtro += " · solo pendientes"
+
+    st.markdown("##### 🏢 Indicadores de oficinas "
+                f"<span style='font-size:.8rem;font-weight:500'>({etiqueta_filtro} · "
+                f"{n_filtro} de {n_universo} oficinas del archivo)</span>",
+                unsafe_allow_html=True)
     cols = st.columns(5)
+
     for col, (cod, nombre) in zip(cols[:3], [("C1", "Componente 1"),
                                              ("C2", "Componente 2 (láser)"),
                                              ("UPS", "UPS")]):
+        # Cada tarjeta se calcula con SU componente, aplicando los mismos filtros.
         sub = b[b["_componente"].eq(cod)] if "_componente" in b.columns else b.iloc[0:0]
+        sub_global = (df[df["_componente"].eq(cod)] if "_componente" in df.columns
+                      else df.iloc[0:0])
         if sub.empty:
-            col.metric(f"{nombre} · oficinas 100% MT3", "0 / 0",
-                       help="Sin datos con los filtros actuales", border=True)
+            col.metric(f"{nombre}: oficinas 100% MT3", "0 / 0",
+                       help=f"Ninguna oficina con {nombre} cumple los filtros actuales.",
+                       border=True)
             continue
         g = sub.groupby("_SBAN")["_mt"].agg(["size", "sum"])
-        total = int(len(g))
-        intervenidas = int((g["sum"] > 0).sum())
-        completas = int((g["sum"] >= g["size"]).sum())
+        visibles = g.index.astype(str).isin(universo)
+        total = int(visibles.sum())
+        completas = int((g["sum"] >= g["size"])[visibles].sum())
         pct = (completas / total * 100) if total else 0.0
-        ayuda = (f"CONTROL MT3 (se calcula con la Data de ejecución, no es el estado oficial): "
-                 f"oficinas donde TODOS los elementos del componente tienen consecutivo MT3: "
-                 f"{completas} de {total}. Oficinas con al menos 1 MT3 (intervenidas): {intervenidas}.")
-        if cod == "UPS":
-            ayuda = ("CONTROL MT3 (calculado con la Data de ejecución): oficinas donde TODOS los "
-                     "UPS cargados tienen consecutivo MT3. NO es el estado oficial de las UPS: "
-                     "el estado oficial es la columna AP «ESTADO UPS» de Campos dashboard, que se "
-                     "resume en la pestaña 🔋 Avance UPS (col AP). "
-                     f"UPS con MT3: {completas} de {total} oficinas; intervenidas: {intervenidas}.")
-        col.metric(
-            f"{nombre} · oficinas 100% MT3", f"{completas} / {total}",
-            delta=f"{pct:.0f}% completas", help=ayuda, border=True,
-        )
+        ayuda = (f"CONTROL MT3, calculado por el panel con la Data de ejecución (no es un estado "
+                 f"oficial): oficinas donde TODOS los elementos de {nombre} tienen consecutivo MT3 "
+                 f"→ {completas} de {total} oficinas que cumplen: {etiqueta_filtro.lower()}.")
+        if len(b) < len(df):
+            # Cuántas oficinas con ese componente quedan FUERA por los filtros activos.
+            fuera = len((set(sub_global["_SBAN"].astype(str)) & universo)
+                        - (set(sub["_SBAN"].astype(str)) & universo))
+            if fuera:
+                ayuda += (f" Los filtros dejan fuera {fuera} oficina(s) que sí tienen {nombre} "
+                          f"(el archivo tiene {n_universo} oficinas en total).")
+        col.metric(f"{nombre}: oficinas 100% MT3", f"{completas} / {total}",
+                   delta=f"{pct:.0f}% completas", help=ayuda, border=True)
 
     with cols[3]:
         if kpi_campos is not None and not getattr(kpi_campos, "empty", True):
@@ -1799,9 +1868,10 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
             pct = (fin / tot * 100) if tot else 0.0
             cols[3].metric(
                 "🏁 Oficinas finalizadas (Campos N)", f"{fin} / {tot}",
-                delta=f"{pct:.0f}% de las sedes",
-                help="Columna N ('Estado de la sede') de Campos dashboard. Cada fila es una sede; "
-                     "'Reprogramada_Finalizada' se contabiliza aparte.",
+                delta=f"{pct:.0f}% del archivo",
+                help="Estado OFICIAL de la sede: columna N ('Estado de la sede') de Campos "
+                     "dashboard, contada por SBAN único. 'Reprogramada_Finalizada' se contabiliza "
+                     "aparte. Es la métrica de referencia de avance por oficina.",
                 border=True,
             )
         else:
@@ -1809,7 +1879,8 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
                            help="Campos dashboard no disponible", border=True)
 
     # Estado OFICIAL de las UPS: columna AP «ESTADO UPS» de Campos dashboard.
-    # Es una fuente distinta al "100% MT3" (que se calcula con la Data de ejecución).
+    # El conteo calculado con la Data (100% MT3) NO se repite aquí: vive como alerta
+    # y en el desplegable de conciliación de la pestaña 🔋 Avance UPS (col AP).
     with cols[4]:
         c_ups_ap = _col(kpi_campos, "ESTADO UPS") if kpi_campos is not None else None
         if c_ups_ap is not None and not getattr(kpi_campos, "empty", True):
@@ -1825,23 +1896,30 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
             api = ku[c_ups_ap].apply(normalizar_estado_ups)
             fin_u = int(api.eq("Finalizada").sum())
             rep_u = int(api.astype(str).str.strip().ne("").sum())
+            con_ups = set(df.loc[df["_componente"].eq("UPS"), "_SBAN"].astype(str))
+            pend_u = len(con_ups - set(ku.loc[api.ne(""), "_SBAN"].astype(str)))
             cols[4].metric(
-                "🔋 UPS finalizadas (col AP)", f"{fin_u} / {rep_u}",
+                "🔋 UPS finalizadas (col AP)", f"{fin_u}",
                 delta=f"{fin_u/rep_u*100:.0f}% de las reportadas" if rep_u else None,
                 help="Fuente OFICIAL del avance UPS: columna AP «ESTADO UPS» de Campos dashboard. "
-                     "El contador de la izquierda ('oficinas 100% MT3') se calcula con la Data y "
-                     "sirve de control; no tiene por qué coincidir.",
+                     f"Reportadas: {rep_u} de {len(ku)} oficinas. "
+                     f"{pend_u} oficina(s) con UPS siguen sin dato en esa columna. "
+                     "El avance calculado con la Data (100% MT3) no se repite aquí: se usa como "
+                     "alerta de consistencia en la pestaña 🔋 Avance UPS (col AP).",
                 border=True,
             )
         else:
             cols[4].metric("🔋 UPS finalizadas (col AP)", "n/d",
                            help="Campos dashboard sin columna «ESTADO UPS»", border=True)
 
-    st.caption("**Componentes (100% MT3)** = oficinas (SBAN) con **todos sus elementos con "
-               "consecutivo MT3 en la Data** (métrica de control, calculada por el panel). "
-               "**Finalizadas (Campos N)** = columna N de Campos dashboard (estado oficial de la "
-               "sede). Para las UPS, el estado oficial es la columna **AP «ESTADO UPS»** (ver "
-               "pestaña 🔋 Avance UPS). Respetan Oficina y el clic del ranking.")
+    st.caption("**Todas las tarjetas usan el mismo universo** (las "
+               f"{n_universo} oficinas de Campos dashboard, una por SBAN) y los mismos filtros "
+               "(Oficina · Facturación · clic del ranking · solo pendientes). "
+               "**Componentes 100% MT3** = control calculado con la Data (numerador y denominador "
+               "cambian juntos con el filtro). **Campos N** y **col AP** = estado oficial del "
+               "archivo, contado por SBAN único. "
+               + (f"La Data trae {n_datos} oficinas: {n_datos - n_universo} de ellas no está(n) en "
+                  "Campos y por eso no entra(n) en las tarjetas." if n_datos > n_universo else ""))
 
 
 # ----------------------------------------------------------------------------
@@ -2572,21 +2650,17 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
                 "Obs. novedad": st.column_config.TextColumn("Obs. novedad", width="large"),
             },
         )
-        m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("Oficinas", f"{n_vis:,}".replace(",", "."), border=True)
-        m2.metric("Total elementos", f"{vt:,}".replace(",", "."), border=True)
-        m3.metric("Subsanados", f"{vs:,}".replace(",", "."), border=True)
-        m4.metric("Pendientes", f"{vp:,}".replace(",", "."), border=True)
-        m5.metric("Avance", f"{va:.1f}%".replace(".", ","),
-                  delta=f"{vp:,} pendientes".replace(",", "."),
-                  delta_color="inverse", border=True)
-        if "Novedades del día" in vis.columns:
-            sedes_nov = int((pd.to_numeric(vis.loc[:n_vis - 1, "Novedades del día"],
-                                           errors="coerce").fillna(0) > 0).sum())
-            n1, n2, n3 = st.columns(3)
-            n1.metric("🏷️ Novedades del día", f"{nd:,}".replace(",", "."), border=True)
-            n2.metric("🏢 Sedes con novedad hoy", f"{sedes_nov:,}".replace(",", "."), border=True)
-            n3.metric("📚 Novedades acumuladas", f"{na:,}".replace(",", "."), border=True)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("🏢 Oficinas mostradas", f"{n_vis:,}".replace(",", "."), border=True,
+                  help="Filas de la tabla (una por SBAN) que cumplen los filtros del resumen. "
+                       "El detalle por sede está en la tabla de abajo.")
+        m2.metric("🏷️ Novedades del día", f"{nd:,}".replace(",", "."), border=True,
+                  help="Novedades de las oficinas con la fecha más reciente del archivo "
+                       "(hoja 'Novedades Equipos').")
+        m3.metric("📚 Novedades acumuladas", f"{na:,}".replace(",", "."), border=True,
+                  help="Total histórico de novedades registradas para esas oficinas.")
+        st.caption("Los conteos de **equipos** (Total · Subsanados · Pendientes · Avance) están en "
+                   "las tarjetas KPI de arriba; aquí solo se repiten **por fila** en la tabla.")
         st.download_button(
             "⬇️ Descargar Excel (vista filtrada + gráficos + novedades)",
             data=generar_excel_resumen(vis),
@@ -2898,8 +2972,9 @@ def main():
     atrib = {"T": "Todos", "Si": "BANCO (Facturable Si)", "No": "COLSOF (No facturable)"}[f_attr]
     encabezado_hero(modulo, scope, atrib, len(filtrado), conteos, nov_resumen, fecha_corte)
 
-    # --- Barra VISIBLE de facturación (Opción 1: filtro a la vista + conteos) ---
-    barra_facturacion(df_mod)
+    # --- Barra VISIBLE de facturación (filtro a la vista) ---
+    # Los conteos ya están en las tarjetas KPI de abajo: aquí solo va el filtro.
+    barra_facturacion(df_mod, mostrar_conteos=False)
 
     if avisos:
         with st.expander(f"🔍 Validación de integridad — {len(avisos)} aviso(s)",
@@ -2908,10 +2983,8 @@ def main():
                 st.warning(msg)
 
     render_kpis(filtrado)
-    render_kpis_oficinas(df, seleccion, f_attr, st.session_state.get("click_sban"), kpi_campos)
-    avance_filtro = float(filtrado["_mt"].mean() * 100) if len(filtrado) else 0.0
-    st.progress(min(max(avance_filtro / 100.0, 0.0), 1.0),
-                text=f"Avance MT3 del filtro actual: {avance_filtro:.1f}%".replace(".", ","))
+    render_kpis_oficinas(df, seleccion, f_attr, st.session_state.get("click_sban"),
+                         kpi_campos, cod_mod=cod_mod, solo_pendientes=solo_pendientes)
 
     if cod_mod == "UPS" and ups_fuente:
         st.caption(f"🔋 Avance de UPS leído de: **{ups_fuente}**.")

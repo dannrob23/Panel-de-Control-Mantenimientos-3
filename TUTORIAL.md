@@ -86,18 +86,37 @@ Muestra, en tiempo real y de forma visual:
 
 ## 5. Las tarjetas KPI (indicadores)
 
+Todas las tarjetas del panel están pensadas para que **cada dato se vea una sola vez**. Si un número
+no coincide con lo que esperabas, revisa primero el filtro 🏦/🏢 y los chips de filtros activos.
+
+### Equipos del módulo (5 tarjetas)
+
 | Indicador | Qué mide |
 |---|---|
 | 📦 **Total de elementos** | Equipos que cumplen los filtros actuales |
-| ✅ **Mantenimientos realizados (MT)** | Equipos con consecutivo MT3 asignado (subsanados) |
+| ✅ **Mantenimientos realizados (MT)** | Equipos con consecutivo MT3 asignado (subsanados) · el delta muestra el **% de avance** |
 | ⚠️ **Mantenimientos pendientes** | Equipos sin consecutivo MT3 (y su % sobre el total) |
 | 🏦 **Facturables (Si)** | Equipos atribuibles al Banco |
 | 🏢 **No facturables (No)** | Equipos de gestión COLSOF |
 
-Debajo verás el **desglose**: `BANCO (Si): 22.230 · COLSOF (No): 7.630 · Total: 29.860`
-y la barra de **Avance MT3 del filtro actual**.
+### Oficinas (5 tarjetas)
+
+Todas usan **el mismo universo**: las **806 oficinas del archivo Campos dashboard** (una por SBAN), y
+los **mismos filtros** (Oficina · Facturación · clic del ranking · solo pendientes). Por eso las cifras
+**no cambian al cambiar de módulo** y son comparables entre sí.
+
+| Indicador | Qué mide |
+|---|---|
+| 🧩 **Componente 1 / Componente 2 / UPS: oficinas 100% MT3** | Oficinas donde **todos** los equipos de ese componente tienen MT3 (control que calcula el panel con la Data) |
+| 🏁 **Oficinas finalizadas (Campos N)** | Estado **oficial** de la sede: columna N de Campos dashboard |
+| 🔋 **UPS finalizadas (col AP)** | Estado **oficial** de las UPS: columna AP «ESTADO UPS». Incluye cuántas oficinas ya reportaron ese dato |
 
 > **Subsanado** = ya tiene mantenimiento hecho (consecutivo MT3). **Pendiente** = aún no lo tiene.
+> **Oficial** = lo que reporta la oficina en Campos dashboard. **Control** = lo que el panel calcula
+> cruzando la Data; sirve para detectar diferencias, no reemplaza el estado oficial.
+>
+> Los conteos de equipos (Total, Subsanados, Pendientes) viven **solo** en el bloque de Equipos; en las
+> tablas se repiten únicamente **por fila** (por oficina), no como total general.
 
 ---
 
@@ -106,7 +125,7 @@ y la barra de **Avance MT3 del filtro actual**.
 | Filtro | Dónde está | Para qué sirve |
 |---|---|---|
 | **Módulo** | Arriba | Ver Componente 1, impresoras o UPS |
-| **Facturación** | Barra visible bajo el encabezado | Ver solo facturables (BANCO) o solo no facturables (COLSOF) |
+| **Facturación** | Barra visible bajo el encabezado | Ver solo facturables (BANCO) o solo no facturables (COLSOF). **Afecta TODAS las tarjetas**, incluidas las de oficinas |
 | **Oficina (SBAN - Nombre)** | Barra lateral ☰ | Elegir una o varias oficinas (escribe para buscar) |
 | **Mostrar solo pendientes ⚠️** | Barra lateral ☰ | Ocultar lo que ya está subsanado |
 | **Clic en el ranking** | Pestaña Gráficos | Haz clic en una barra del ranking para filtrar esa sede |
@@ -131,20 +150,24 @@ Tabla con una fila por sede: `SBAN · Oficina · Estado · Total · Subsanados �
 Categoría novedad · Nov. del día · Nov. acumuladas`, más una fila de **totales**.
 Tiene sus **propios filtros** (estado del cronograma, avance mínimo, categoría de novedad, solo novedades del día)
 y el botón **⬇️ Descargar Excel** (vista filtrada + gráficos + novedades).
+Los **totales de equipos** no se repiten como tarjetas aquí: están en las tarjetas KPI de arriba
+(esta vista solo los muestra **por fila**).
 
 ### 🔋 Avance UPS (col AP) — solo en el módulo UPS
-Panel del avance de las UPS tomado de la **columna AP «ESTADO UPS»** del archivo Campos dashboard:
+Panel del avance de las UPS tomado de la **columna AP «ESTADO UPS»** del archivo Campos dashboard.
+Solo lista las oficinas **con UPS en la Data**:
 
 | Indicador | Qué mide |
 |---|---|
-| 🔋 **Sedes con UPS (col AP)** | Sedes que traen algún valor en esa columna |
-| ✅ **UPS finalizadas (col AP)** | Sedes marcadas `Finalizado` (y su % sobre el total) |
+| 🔋 **Cobertura col AP** | Oficinas con UPS que ya traen algún valor en esa columna |
+| ✅ **UPS finalizadas (col AP)** | Oficinas marcadas `Finalizado` (indicador oficial) |
 | 🟨 **En proceso · ⬜ Programadas** | Conteo de los demás estados de la columna AP |
-| ⚪ **Sin reporte en col AP** | Sedes sin dato + número de **alertas** |
+| ⚠️ **Diferencias AP vs MT3** | Oficinas donde el estado oficial y el control de MT3 no cuadran |
 
 La tabla muestra `SBAN · Oficina · UPS en Data · UPS con MT3 · Avance MT3 % · Estado UPS (col AP) ·
-Observación UPS · Alerta`. Las **alertas** cruzan la columna AP con la Data (por ejemplo, una sede que dice
-`Finalizado` pero todavía tiene UPS sin MT3). Puedes **descargar** el panel en CSV o Excel.
+Observación UPS · Alerta`, y el desplegable **❓ Conciliación** explica la diferencia entre el dato oficial
+(141 UPS finalizadas en la columna AP) y el control calculado con la Data (162 oficinas al 100% MT3).
+Puedes **descargar** el panel en CSV o Excel.
 
 ### 📰 Novedades de las oficinas — en todos los módulos
 Novedades reportadas por las oficinas (hoja **Novedades Equipos** del archivo Campos dashboard):

@@ -20,6 +20,13 @@ novedades por sede y fecha/hora de última actualización.
 - **Chips de estado** en el encabezado: módulo, operatividad, fecha de datos, filtro de facturación activo,
   regla de impresoras, datos desactualizados y modo público.
 - **Encabezado (hero)** con la vista actual y los totales base; **tarjetas KPI** con desglose de facturación.
+- **Indicadores uniformes (una sola fuente por concepto)**: los equipos se cuentan en un único bloque de
+  5 tarjetas (Total · MT con el % de avance · Pendientes · Facturables · No facturables) y las oficinas en
+  un bloque de 5 tarjetas con **el mismo universo** (las 806 oficinas del archivo Campos dashboard, una por
+  SBAN) y **los mismos filtros** (Oficina · Facturación · clic del ranking · solo pendientes):
+  `Componente 1/2/UPS: oficinas 100% MT3`, `🏁 Oficinas finalizadas (Campos N)` y
+  `🔋 UPS finalizadas (col AP)`. Las cifras no cambian al cambiar de módulo y el tooltip explica qué queda
+  fuera del filtro.
 - **Pestañas**: 📈 Gráficos y avance · 🏢 Resumen por oficina · 📋 Gestión de novedades; en el módulo **UPS**
   se agrega **🔋 Avance UPS (col AP)** y siempre está disponible **📰 Novedades de las oficinas**.
 - **Avance de las UPS desde la columna AP «ESTADO UPS»** del archivo *Campos dashboard* (Banco Agrario y
@@ -154,6 +161,12 @@ raíz del proyecto antes de publicar, para que la nube reciba exactamente la ver
   El cruce con la Data es por **Serial** y, si no aparece, por texto de la observación; el resumen por sede
   se amarra por **SBAN** (respaldo `SBAN PCT`).
 - **Subsanado** = tiene consecutivo MT3 · **Pendiente** = no lo tiene.
+- **Un solo denominador para las oficinas (806).** Las tarjetas de oficinas usan el universo de
+  **Campos dashboard** (una fila por SBAN); las 3 oficinas que están en la Data y no en Campos (bodegas)
+  quedan fuera y el panel lo advierte en la nota al pie. Antes cada tarjeta usaba un universo distinto
+  (808 de la Data / 824 filas de Campos / 805 de UPS), lo que hacía ver cifras incoherentes.
+- **% de avance:** un único indicador, como delta de la tarjeta de MT realizados (antes se repetía en una
+  barra de progreso aparte).
 - Al cambiar de módulo se reinician los filtros que podrían dejar la vista vacía.
 
 ---

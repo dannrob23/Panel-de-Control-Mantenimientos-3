@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard Seguimiento Inventario MT3</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --navy:#1F4E78; --blue:#2E75B6; --green:#2E9E5B; --red:#D64541; --orange:#E67E22;
+  --ink:#22303F; --muted:#6B7787; --bg:#EEF2F6; --card:#FFFFFF; --line:#DDE4EC;
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+body{font-family:'Segoe UI',system-ui,Arial,sans-serif; background:var(--bg); color:var(--ink);}
+header{background:linear-gradient(90deg,#17395C,#2E75B6); color:#fff; padding:18px 26px;
+  box-shadow:0 2px 8px rgba(0,0,0,.15);}
+header h1{font-size:20px; letter-spacing:.3px;}
+header .sub{font-size:12px; opacity:.85; margin-top:4px;}
+.kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px;
+  padding:16px 22px;}
+.kpi{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px;
+  box-shadow:0 1px 3px rgba(16,42,67,.08);}
+.kpi .v{font-size:24px; font-weight:700; color:var(--navy); line-height:1.2;}
+.kpi .v.neg{color:var(--red);}
+.kpi .l{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; margin-top:4px;}
+.kpi .d{font-size:11px; margin-top:3px; color:var(--muted);}
+.badge{display:inline-block; padding:2px 8px; border-radius:20px; font-size:11px; font-weight:600; white-space:nowrap;}
+.b-verde{background:#E3F2E8; color:#1E7A43;} .b-rojo{background:#FBE6E5; color:#B03A34;}
+.b-azul{background:#E4EEF8; color:#1F4E78;} .b-gris{background:#ECEEF1; color:#5A6572;}
+.b-ambar{background:#FDF0DC; color:#9A6410;}
+.filtros{display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:0 22px 8px;}
+.filtros label{font-size:12px; font-weight:600; color:var(--muted);}
+.filtros select,.filtros input{border:1px solid var(--line); border-radius:6px; padding:7px 10px;
+  font-size:13px; background:#fff; color:var(--ink);}
+.filtros .btn{border:1px solid var(--line); background:#fff; border-radius:6px; padding:6px 12px;
+  font-size:13px; cursor:pointer;}
+.filtros .btn.on{background:var(--navy); color:#fff; border-color:var(--navy);}
+nav{display:flex; gap:4px; padding:10px 22px 0;}
+nav button{border:1px solid var(--line); background:#fff; color:var(--muted); font-weight:600;
+  font-size:13px; padding:9px 16px; cursor:pointer; border-radius:8px 8px 0 0;}
+nav button.on{background:var(--navy); color:#fff; border-color:var(--navy);}
+main{padding:14px 22px 30px;}
+.panel{display:none; background:var(--card); border:1px solid var(--line); border-radius:10px;
+  padding:18px;}
+.panel.on{display:block;}
+.charts{display:grid; grid-template-columns:1fr 1fr; gap:20px;}
+.box{border:1px solid var(--line); border-radius:10px; padding:14px; background:#FBFCFE;}
+.box h3{font-size:13px; color:var(--navy); margin-bottom:10px; letter-spacing:.2px;}
+.holder{position:relative; height:320px;}
+table{border-collapse:collapse; width:100%; font-size:12.5px;}
+th{position:sticky; top:0; background:#17395C; color:#fff; text-align:left; padding:8px 9px;
+  font-weight:600; white-space:nowrap; cursor:pointer; user-select:none; z-index:2;}
+td{border-top:1px solid var(--line); padding:7px 9px; vertical-align:top;}
+tbody tr:nth-child(even) td{background:#F7FAFD;}
+tbody tr:hover td{background:#EDF4FB;}
+.num{text-align:right; font-variant-numeric:tabular-nums;}
+.pag{display:flex; gap:10px; align-items:center; margin:0; font-size:13px;}
+.pag button{border:1px solid var(--line); border-radius:6px; padding:5px 12px; background:#fff;
+  cursor:pointer;}
+.pag button:disabled{opacity:.4; cursor:default;}
+.bar{height:9px; border-radius:6px; background:#E8EEF4; overflow:hidden; min-width:70px;}
+.bar>div{height:100%; background:var(--green);}
+.resumen{font-size:13px; color:var(--muted); margin:8px 0;}
+.foot{margin-top:16px; font-size:11px; color:var(--muted);}
+.wrap{overflow:auto; max-height:70vh;}
+@media(max-width:1100px){ .charts{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<header>
+  <h1>DASHBOARD SEGUIMIENTO NOVEDADES INVENTARIO · MANTENIMIENTO 3</h1>
+  <div class="sub" id="sub">Cargando datos…</div>
+</header>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="filtros">
+  <label>Regional</label>
+  <select id="fRegion"><option value="">Todas</option></select>
+  <label>Atribución</label>
+  <span id="fFact">
+    <button class="btn on" data-f="T">Todos</button>
+    <button class="btn" data-f="Si">BANCO (Si)</button>
+    <button class="btn" data-f="No">COLSOF (No)</button>
+  </span>
+  <label>Buscar SBAN / Oficina</label>
+  <input id="fBusca" placeholder="ej. 02128, Funza, Bodega…" style="min-width:200px">
+  <button class="btn" id="fReset">Limpiar</button>
+</div>
+
+<nav>
+  <button class="on" data-tab="tabGraf">Gráficas</button>
+  <button data-tab="tabCtrl">Control por Oficina</button>
+  <button data-tab="tabFalt">Faltantes MT3</button>
+  <button data-tab="tabAl">Alertas (Sobrantes)</button>
+</nav>
+
+<main>
+  <section class="panel on" id="tabGraf">
+    <div class="charts">
+      <div class="box"><h3 id="tReg">MT3 realizado vs pendiente por Regional</h3>
+        <div class="holder"><canvas id="cReg"></canvas></div></div>
+      <div class="box"><h3 id="tPie">Elementos BANCO vs COLSOF</h3>
+        <div class="holder"><canvas id="cPie"></canvas></div></div>
+      <div class="box"><h3 id="tTop">Top 15 oficinas con más pendientes de MT3</h3>
+        <div class="holder"><canvas id="cTop"></canvas></div></div>
+      <div class="box"><h3>MT3 realizados por día (campaña en curso)</h3>
+        <div class="holder"><canvas id="cDia"></canvas></div></div>
+    </div>
+    <p class="foot">1 fila = 1 elemento (Serial único). AN Si = atribuible a BANCO · AN No = gestión COLSOF.
+    Pendiente (Diferencia) = Elementos − Con MT3. Casos “SOBRA” = ticket MT3 asignado a más de un SBAN (ver pestaña Alertas).</p>
+  </section>
+
+  <section class="panel" id="tabCtrl">
+    <div class="resumen" id="ctrlResumen"></div>
+    <div class="wrap">
+      <table id="tabCtrl"><thead><tr></tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <section class="panel" id="tabFalt">
+    <div class="filtros" style="padding:0 0 8px;">
+      <label>Buscar</label>
+      <input id="fFalt" placeholder="Serial, placa, modelo, estado, oficina, SBAN…" style="min-width:280px">
+      <div class="pag">
+        <button id="antF">‹ Anterior</button><span id="fPag"></span><button id="sigF">Siguiente ›</button>
+      </div>
+    </div>
+    <div class="resumen" id="faltResumen"></div>
+    <div class="wrap">
+      <table id="tabFalt"><thead><tr></tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <section class="panel" id="tabAl">
+    <div class="resumen">Tickets MT3 (col G) que aparecen asignados a más de un SBAN:
+      posible duplicación o elemento “sobrante” (detalle también en Observación del Control por Oficina).</div>
+    <div class="wrap">
+      <table id="tabAl"><thead><tr></tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+</main>
+
+<script src="data.js"></script>
+<script>
+"use strict";
+const D = window.DATA;
+const fmt = n => Number(n).toLocaleString('es-CO');
+const fmtCur = n => '$ ' + Math.round(n).toLocaleString('es-CO');
+const estado = { r:'', f:'T', q:'' };
+
+/* ---------- filtro por tipo / filas visibles ---------- */
+function tDatos(row, tipo){
+  if(tipo==='Si') return {e:row.eS, c:row.cS, p:row.eS-row.cS, es:row.eS, en:0, k:row.k, v:row.v};
+  if(tipo==='No') return {e:row.eN, c:row.cN, p:row.eN-row.cN, es:0, en:row.eN, k:row.k, v:0};
+  return {e:row.e, c:row.c, p:row.p, es:row.eS, en:row.eN, k:row.k, v:row.v};
+}
+function viewRows(){
+  const q = estado.q.trim().toLowerCase();
+  const out = [];
+  for(const row of D.control){
+    if(estado.r && row.r !== estado.r) continue;
+    const t = tDatos(row, estado.f);
+    if(t.e === 0) continue;
+    if(q && !(row.s+' '+row.o+' '+row.r).toLowerCase().includes(q)) continue;
+    out.push({ row:row, t:t });
+  }
+  return out;
+}
+
+/* ---------- KPIs ---------- */
+function renderKpis(rows){
+  const S = rows.reduce((a,x)=>({e:a.e+x.t.e, c:a.c+x.t.c, p:a.p+x.t.p, s:a.s+x.t.es, n:a.n+x.t.en}),
+                          {e:0,c:0,p:0,s:0,n:0});
+  const av = S.e ? S.c/S.e : 0;
+  const cards = [
+    {v:fmt(S.e), l:'Elementos', d:'filas en el filtro'},
+    {v:fmt(S.c), l:'Con MT3 (col G)', d:'ya tienen mantenimiento 3'},
+    {v:fmt(S.p), l:'Pendientes MT3', d:'faltan por hacer', neg:S.p>0},
+    {v:(av*100).toFixed(1).replace('.',',')+'%', l:'Avance', d:'con MT3 / total'},
+    {v:fmt(S.s), l:'BANCO · Facturable Si', d:'atribuible a banco'},
+    {v:fmt(S.n), l:'COLSOF · No facturable', d:'gestión COLSOF'},
+    {v:fmt(D.resumen.tickets), l:'Tickets MT3 únicos', d:'total de la base'},
+    {v:fmtCur(D.resumen.valor), l:'Valor facturación BANCO', d:'total de la base'},
+  ];
+  const el = document.getElementById('kpis'); el.innerHTML = '';
+  cards.forEach(k=>{
+    const d = document.createElement('div'); d.className='kpi';
+    d.innerHTML = '<div class="v'+(k.neg?' neg':'')+'">'+k.v+'</div><div class="l">'+k.l+
+                  '</div><div class="d">'+k.d+'</div>';
+    el.appendChild(d);
+  });
+}
+
+/* ---------- Gráficas ---------- */
+const charts = {};
+const REG_ORD = ['Antioquia','Bogotá','Cafetera','Costa','Dirección General',
+                 'Occidente','Oriente','Santanderes','Sur','SIN REGIONAL'];
+
+function updGraf(rows){
+  const tipo = estado.f;
+  const map = {};
+  rows.forEach(x=>{ map[x.row.r] = map[x.row.r] || {c:0,p:0}; map[x.row.r].c += x.t.c; map[x.row.r].p += x.t.p; });
+  const labs = REG_ORD.filter(n=>map[n] && map[n].c+map[n].p>0);
+  charts.reg.data.labels = labs;
+  charts.reg.data.datasets[0].data = labs.map(n=>map[n].c);
+  charts.reg.data.datasets[1].data = labs.map(n=>map[n].p);
+  charts.reg.update();
+
+  if(tipo === 'T'){
+    const s = rows.reduce((a,x)=>a+x.t.es,0), n2 = rows.reduce((a,x)=>a+x.t.en,0);
+    document.getElementById('tPie').textContent = 'Elementos BANCO vs COLSOF';
+    charts.pie.data.labels = ['BANCO (Facturable Si)','COLSOF (No facturable)'];
+    charts.pie.data.datasets[0].data = [s, n2];
+    charts.pie.data.datasets[0].backgroundColor = ['#2E75B6','#E67E22'];
+  }else{
+    const c = rows.reduce((a,x)=>a+x.t.c,0), p = rows.reduce((a,x)=>a+x.t.p,0);
+    document.getElementById('tPie').textContent = (tipo==='Si'?'BANCO (Si)':'COLSOF (No)')+' · Con MT3 vs pendientes';
+    charts.pie.data.labels = ['Con MT3','Pendientes'];
+    charts.pie.data.datasets[0].data = [c, p];
+    charts.pie.data.datasets[0].backgroundColor = ['#2E9E5B','#D64541'];
+  }
+  charts.pie.update();
+
+  const top = rows.slice().sort((a,b)=>b.t.p-a.t.p).slice(0,15).reverse();
+  charts.top.data.labels = top.map(x=>x.row.s+' '+x.row.o);
+  charts.top.data.datasets[0].data = top.map(x=>x.t.p);
+  charts.top.update();
+}
+
+function initCharts(){
+  Chart.defaults.font.family = "'Segoe UI',Arial,sans-serif";
+  Chart.defaults.font.size = 11;
+  const mk = (id,cfg)=>{ const c = document.getElementById(id).getContext('2d'); charts[id]=new Chart(c,cfg); };
+  mk('cReg',{ type:'bar',
+    data:{ labels:[], datasets:[
+      {label:'Con MT3', data:[], backgroundColor:'#2E9E5B', stack:'s'},
+      {label:'Pendientes', data:[], backgroundColor:'#D64541', stack:'s'}]},
+    options:{ maintainAspectRatio:false, scales:{ x:{stacked:true}, y:{stacked:true, beginAtZero:true}},
+      plugins:{legend:{position:'bottom'}}}});
+  mk('cPie',{ type:'doughnut',
+    data:{ labels:[], datasets:[{data:[], backgroundColor:['#2E75B6','#E67E22']}]},
+    options:{ maintainAspectRatio:false, cutout:'55%', plugins:{legend:{position:'bottom'}}}});
+  mk('cTop',{ type:'bar',
+    data:{ labels:[], datasets:[{label:'Pendientes MT3', data:[], backgroundColor:'#D64541'}]},
+    options:{ indexAxis:'y', maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{ x:{beginAtZero:true}}}});
+  mk('cDia',{ type:'line',
+    data:{ labels:D.diario.labels, datasets:[{label:'MT3 realizados', data:D.diario.datos,
+      borderColor:'#2E75B6', backgroundColor:'rgba(46,117,182,.15)', fill:true, tension:.25}]},
+    options:{ maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}}}});
+}
+
+/* ---------- Tabla control ---------- */
+const COLS = [
+  ['r','Regional',0],['s','SBAN',0],['o','Oficina',0],['e','Elementos',1],
+  ['c','Con MT3',1],['p','Pendientes',1],['av','Avance',1],['es','BANCO (Si)',1],
+  ['en','COLSOF (No)',1],['k','Tickets MT3',1],['v','Valor facturación',1],['obs','Observación',0]];
+let sortKey = 'p', sortAsc = false;
+function colVal(row, t, key){
+  if(key==='r'||key==='s'||key==='o') return row[key];
+  if(key==='av') return t.e ? t.c/t.e : 0;
+  if(key==='v') return t.v;
+  return t[key];
+}
+function renderCtrl(){
+  const rows = viewRows();
+  const S = rows.reduce((a,x)=>({e:a.e+x.t.e,c:a.c+x.t.c,p:a.p+x.t.p}),{e:0,c:0,p:0});
+  document.getElementById('ctrlResumen').textContent =
+    rows.length+' de '+D.control.length+' oficinas · '+fmt(S.e)+' elementos · '+fmt(S.p)+' pendientes MT3';
+  const srt = rows.slice().sort((a,b)=>{
+    const av = colVal(a.row,a.t,sortKey), bv = colVal(b.row,b.t,sortKey);
+    const cmp = (typeof av==='string' && typeof bv==='string')
+      ? av.localeCompare(bv,'es') : (av<bv?-1:av>bv?1:0);
+    return (sortAsc?1:-1)*cmp;
+  });
+  const thead = document.querySelector('#tabCtrl thead tr'); thead.innerHTML='';
+  COLS.forEach(c=>{
+    const h=document.createElement('th'); h.textContent=c[1]+(sortKey===c[0]?(sortAsc?' ▲':' ▼'):'');
+    if(c[2]) h.classList.add('num');
+    h.onclick=()=>{ if(sortKey===c[0]) sortAsc=!sortAsc; else {sortKey=c[0]; sortAsc=false;} renderCtrl(); };
+    thead.appendChild(h);
+  });
+  const tb = document.querySelector('#tabCtrl tbody'); tb.innerHTML='';
+  srt.forEach(x=>{
+    const r=x.row, t=x.t, av=t.e?t.c/t.e:0;
+    const cls = r.obs.indexOf('SOBRA')>=0?'b-ambar':(r.obs.indexOf('FALTAN')>=0?'b-rojo':
+      (r.obs.indexOf('Completo')>=0?'b-verde':'b-gris'));
+    const html = [
+      r.r, r.s, r.o, fmt(t.e), fmt(t.c),
+      '<b>'+fmt(t.p)+'</b>',
+      '<span style="display:inline-flex;align-items:center;gap:6px"><span class="bar"><span style="display:block;width:'+(av*100).toFixed(1)+'%;height:100%;background:#2E9E5B"></span></span>'+(av*100).toFixed(1).replace('.',',')+'%</span>',
+      fmt(t.es), fmt(t.en), fmt(t.k), fmtCur(t.v),
+      '<span class="badge '+cls+'">'+r.obs+'</span>'];
+    const tr=document.createElement('tr');
+    html.forEach((h,i)=>{ const td=document.createElement('td');
+      if(COLS[i][2]) td.classList.add('num'); td.innerHTML=h; tr.appendChild(td); });
+    tb.appendChild(tr);
+  });
+}
+
+/* ---------- Faltantes (paginado) ---------- */
+const FSIZE = 100;
+let faltQ='', faltPage=0;
+function faltRows(){
+  const q=faltQ.trim().toLowerCase();
+  if(!q) return D.faltantes;
+  return D.faltantes.filter(r=>r.join(' ').toLowerCase().includes(q));
+}
+function renderFalt(){
+  const all = faltRows();
+  const pages = Math.max(1, Math.ceil(all.length/FSIZE));
+  if(faltPage>pages-1) faltPage=pages-1;
+  const slice = all.slice(faltPage*FSIZE, faltPage*FSIZE+FSIZE);
+  document.getElementById('faltResumen').textContent =
+    fmt(all.length)+' elementos sin MT3 (buscar para acotar)';
+  document.getElementById('fPag').textContent = 'Página '+(faltPage+1)+' de '+pages+' · '+fmt(all.length)+' resultados';
+  document.getElementById('antF').disabled = faltPage===0;
+  document.getElementById('sigF').disabled = faltPage>=pages-1;
+  const thead = document.querySelector('#tabFalt thead tr'); thead.innerHTML='';
+  D.falt_hdr.forEach(h=>{ const c=document.createElement('th'); c.textContent=h; thead.appendChild(c); });
+  const tb = document.querySelector('#tabFalt tbody'); tb.innerHTML='';
+  slice.forEach(r=>{
+    const tr=document.createElement('tr');
+    r.forEach(v=>{ const td=document.createElement('td');
+      td.textContent = (v===''||v==='None') ? '—' : v;
+      tr.appendChild(td); });
+    tb.appendChild(tr);
+  });
+}
+
+/* ---------- Alertas ---------- */
+function renderAl(){
+  const thead = document.querySelector('#tabAl thead tr'); thead.innerHTML='';
+  ['Ticket MT3 (G)','Nº SBAN','SBANs involucrados','Filas (elementos)'].forEach(h=>{
+    const c=document.createElement('th'); c.textContent=h; thead.appendChild(c); });
+  const tb = document.querySelector('#tabAl tbody'); tb.innerHTML='';
+  D.alertas.forEach(a=>{
+    const tr=document.createElement('tr');
+    [['<span class="badge b-ambar">'+a.g+'</span>',0],[String(a.n),1],[a.sbans.join(', '),0],
+     [fmt(a.filas),1]].forEach(([v,num])=>{
+      const td=document.createElement('td'); if(num) td.classList.add('num');
+      td.innerHTML=v; tr.appendChild(td); });
+    tb.appendChild(tr);
+  });
+}
+
+/* ---------- Navegación / filtros / arranque ---------- */
+function refresh(){
+  const rows = viewRows();
+  renderKpis(rows); updGraf(rows); renderCtrl();
+}
+function init(){
+  const sel = document.getElementById('fRegion');
+  REG_ORD.forEach(n=>{ if(D.control.some(r=>r.r===n)){
+    const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); } });
+  document.getElementById('sub').textContent =
+    'Base: '+fmt(D.resumen.totalEle)+' elementos · '+fmt(D.resumen.totalCon)+' con MT3 ('+
+    ((D.resumen.totalCon/D.resumen.totalEle)*100).toFixed(1).replace('.',',')+'%) · '+
+    fmt(D.resumen.banco)+' BANCO (Si) / '+fmt(D.resumen.colsof)+' COLSOF (No) · Generado: '+D.resumen.generado;
+
+  document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+    document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on',p.id===b.dataset.tab));
+  });
+  sel.onchange = ()=>{ estado.r = sel.value; refresh(); };
+  document.querySelectorAll('#fFact .btn').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('#fFact .btn').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on'); estado.f = b.dataset.f; refresh();
+  });
+  let deb;
+  document.getElementById('fBusca').oninput = e=>{ clearTimeout(deb);
+    deb=setTimeout(()=>{ estado.q=e.target.value; refresh(); },200); };
+  document.getElementById('fReset').onclick = ()=>{ sel.value=''; estado.r=''; estado.f='T';
+    document.getElementById('fBusca').value=''; estado.q='';
+    document.querySelectorAll('#fFact .btn').forEach(x=>x.classList.toggle('on',x.dataset.f==='T'));
+    refresh(); };
+
+  document.getElementById('fFalt').oninput = e=>{ clearTimeout(deb);
+    deb=setTimeout(()=>{ faltQ=e.target.value; faltPage=0; renderFalt(); },200); };
+  document.getElementById('antF').onclick = ()=>{ if(faltPage>0){faltPage--; renderFalt();} };
+  document.getElementById('sigF').onclick = ()=>{ faltPage++; renderFalt(); };
+
+  initCharts(); refresh(); renderFalt(); renderAl();
+}
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

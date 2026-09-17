@@ -1,0 +1,36 @@
+# Data files (large, contain PII)
+*.xlsx
+*.csv
+*.RMP
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.coverage
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Uploads and temporary files
+uploads/
+data/
+Ingesta de datos diaria/
+deploy_panel/data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Backup files
+*_backup_*.py

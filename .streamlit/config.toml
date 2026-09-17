@@ -1,0 +1,13 @@
+[theme]
+# Tema base = CLARO. Así las tablas (data-grid, canvas) se ven claras en la vista clara.
+# La VISTA OSCURA se controla con el motor de temas propio del panel (TEMAS en app.py),
+# que sobreescribe fondos, tarjetas, textos y gráficos por CSS.
+base = "light"
+primaryColor = "#1F4E78"
+backgroundColor = "#F2F5F9"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1B2430"
+font = "sans serif"
+
+[server]
+headless = true

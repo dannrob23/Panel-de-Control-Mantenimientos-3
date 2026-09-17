@@ -129,6 +129,14 @@ Al inicio de `ingesta.py` está la sección **`1) CONFIGURACION`**:
 | `COLUMNAS_OBLIGATORIAS` | Si falta alguna, el script **detiene la publicación** para no romper el panel |
 | `SHEETS_POR_TIPO` | Qué hojas se conservan de cada Excel |
 | `NOMBRES_DESTINO` | Nombre con el que se publica cada archivo |
+| `CONFIG_GIT` | Autor de los commits, backend TLS (`openssl`) y ruta del Credential Manager |
+
+> 🔑 **Credenciales de GitHub**: el script usa las credenciales que ya tenga guardadas el
+> *Git Credential Manager* del equipo (una sola vez: `git push` manual y autenticarse).
+> Si el helper no puede ejecutarse (por ejemplo en una consola no interactiva), el script
+> reintenta con la credencial guardada e **inyecta el token sin mostrarlo en pantalla**.
+> En este equipo `schannel` falla con `SEC_E_NO_CREDENTIALS`: por eso `CONFIG_GIT["ssl_backend"]`
+> está en `openssl`.
 
 Para analizar una columna nueva: ejecuta la opción **3**, abre `tools\analisis_ingesta.md`
 (columnas, % de datos y valores más frecuentes) y agrega el ajuste en `ANALISIS_COLUMNAS`.
@@ -140,7 +148,7 @@ el script se detiene con un mensaje claro en vez de romper el panel.
 
 > 🔎 Si el `push` falla por credenciales de GitHub (`SEC_E_NO_CREDENTIALS`), abre Git Bash/CMD,
 > ejecuta `git -C deploy_panel push origin main` e introduce tu usuario y token una vez; los commits
-> ya quedan hechos y solo falta subirlos.
+> ya quedan hechos y solo falta subirlos. El script también lo intenta solo con la credencial guardada.
 
 ---
 

@@ -2,7 +2,7 @@
 uploads/
 __pycache__/
 *.pyc
-app_backup_componente1_*.py
+app_backup_*.py
 *.log
 
 # Respaldos y artefactos que no se despliegan
@@ -17,3 +17,4 @@ venv/
 
 # Configuración local con secretos (modo_admin, modo_publico) — NO subir
 .streamlit/secrets.toml
+.gstack/

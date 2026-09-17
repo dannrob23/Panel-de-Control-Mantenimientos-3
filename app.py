@@ -91,13 +91,18 @@ html, body, .stApp, [class*="css"] { font-family: 'Inter', system-ui, sans-serif
 h1, h2, h3, h4 { color: __INK__ !important; font-weight: 800 !important; letter-spacing: -.4px; }
 p, li, label { color: __INK__ !important; }
 [data-testid="stCaptionContainer"] p, .stCaption, small { color: __MUTED__ !important; }
+/* --- Tarjetas KPI (detalle y resumen): mismo lenguaje visual que las destacadas --- */
 [data-testid="stMetric"] { background: __CARD__ !important; border: 1px solid __BORDER__ !important;
-  border-radius: 14px; padding: 14px 16px; box-shadow: __SOMBRA__; }
+  border-radius: 16px; padding: 14px 15px 13px; box-shadow: __SOMBRA__; }
 [data-testid="stMetricValue"] { color: __INK__ !important; font-weight: 800 !important;
-  font-size: 1.8rem !important; letter-spacing: -.6px; }
-[data-testid="stMetricLabel"] p { color: __MUTED__ !important; font-weight: 600 !important;
-  font-size: .82rem !important; white-space: normal !important; overflow: visible !important;
-  text-overflow: clip !important; line-height: 1.25 !important; }
+  font-size: 1.45rem !important; letter-spacing: -1.1px;
+  white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important; }
+[data-testid="stMetricValue"] > div, [data-testid="stMetricValue"] > span {
+  white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important; }
+[data-testid="stMetricLabel"] p { color: __MUTED__ !important; font-weight: 700 !important;
+  font-size: .70rem !important; letter-spacing: .7px !important; text-transform: uppercase;
+  white-space: normal !important; overflow: visible !important;
+  text-overflow: clip !important; line-height: 1.2 !important; }
 .stButton > button { border-radius: 10px !important; border: 1px solid __BORDER__ !important;
   background: __CARD__ !important; color: __INK__ !important; font-weight: 600 !important; }
 .stButton > button p { color: inherit !important; }
@@ -155,6 +160,17 @@ button[role="radio"][aria-checked="true"] p, button[role="radio"][aria-checked="
   color: __MUTED__ !important; }
 [data-testid="stMainMenu"] { color: __MUTED__ !important; }
 
+/* ===== KPIs destacados (oficinas · avance · equipos impactados) ===== */
+.kd { background: __CARD__ !important; border: 1px solid __BORDER__ !important;
+  border-radius: 16px; padding: 15px 18px 14px; box-shadow: __SOMBRA__; height: 100%; }
+.kd-lbl { font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase;
+  color: __MUTED__ !important; }
+.kd-num { font-size: 40px; font-weight: 800; letter-spacing: -1.8px; color: __INK__ !important;
+  line-height: 1.05; margin-top: 6px; }
+.kd-sub { font-size: 11.5px; color: __MUTED__ !important; margin-top: 6px; }
+.kd-bar { height: 7px; border-radius: 99px; background: __BORDER__; margin-top: 10px; overflow: hidden; }
+.kd-bar > i { display: block; height: 100%; border-radius: 99px; }
+
 /* ================= RESPONSIVE (tablet y móvil) ================= */
 @media (max-width: 1000px) {
   [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; gap: .55rem !important; }
@@ -166,6 +182,7 @@ button[role="radio"][aria-checked="true"] p, button[role="radio"][aria-checked="
   #mt3-hero-titulo { font-size: 19px !important; line-height: 1.2 !important; }
   #mt3-hero-sub { font-size: 12px !important; }
   [data-testid="stMetricValue"] { font-size: 1.45rem !important; }
+  .kd-num { font-size: 30px !important; letter-spacing: -1px !important; }
   [data-testid="stMetric"] { padding: 11px 13px !important; }
   [data-testid="stMainBlockContainer"] { padding: .8rem .7rem 2.5rem !important; }
   p, li, label { font-size: .93rem !important; }
@@ -1737,6 +1754,140 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
 # ----------------------------------------------------------------------------
 # Métricas KPI
 # ----------------------------------------------------------------------------
+def _sparkline_svg(valores, color: str, w: int = 118, h: int = 30) -> str:
+    """Sparkline SVG inline (sin dependencias) a partir de una serie de valores."""
+    vals = [float(v) for v in valores if v is not None]
+    if len(vals) < 2:
+        return ""
+    vmin, vmax = min(vals), max(vals)
+    rango = (vmax - vmin) or 1.0
+    n = len(vals)
+    pts = [(2 + i * (w - 4) / (n - 1), (h - 3) - ((v - vmin) / rango) * (h - 9))
+           for i, v in enumerate(vals)]
+    linea = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+    area = f"{pts[0][0]:.1f},{h - 2} " + linea + f" {pts[-1][0]:.1f},{h - 2}"
+    cx, cy = pts[-1]
+    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" style="display:block">'
+            f'<polygon points="{area}" fill="{color}" opacity=".15"/>'
+            f'<polyline points="{linea}" fill="none" stroke="{color}" stroke-width="2" '
+            f'stroke-linejoin="round" stroke-linecap="round"/>'
+            f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="3" fill="{color}"/></svg>')
+
+
+def oficinas_campos(kpi_campos, seleccion=None, click_sban=None):
+    """Fuente ÚNICA de los indicadores oficiales de Campos dashboard.
+
+    Devuelve (universo, finalizadas_N, reportadas_AP, finalizadas_AP), todo contado por
+    **SBAN único** (no por fila) para que cualquier tarjeta que use este dato muestre
+    exactamente la misma cifra. Lo usan las tarjetas destacadas y las de indicadores.
+    """
+    if kpi_campos is None or getattr(kpi_campos, "empty", True):
+        return set(), 0, 0, 0
+    c_sb = _col(kpi_campos, "SBAN")
+    if c_sb is None:
+        return set(), 0, 0, 0
+    kk = kpi_campos.copy()
+    kk["_SBAN"] = kk[c_sb].apply(_pad5)
+    kk = kk[kk["_SBAN"].astype(str).str.len() > 0]
+    if seleccion:
+        sbans = {str(s).split(" - ")[0] for s in seleccion}
+        kk = kk[kk["_SBAN"].isin(sbans)]
+    if click_sban:
+        kk = kk[kk["_SBAN"].eq(click_sban)]
+    universo = set(kk["_SBAN"].astype(str))
+
+    def _primero(valores):
+        """Estado por SBAN con prioridad (una sede puede tener varias filas)."""
+        mejor = {}
+        for sban, valor in valores:
+            v = str(valor).strip()
+            if not v:
+                continue
+            actual = mejor.get(sban)
+            if actual is None:
+                mejor[sban] = v
+                continue
+            for p in _PRIO_UPS:
+                if p == v and p != actual:
+                    mejor[sban] = v
+                    break
+        return mejor
+
+    finalizadas_n = 0
+    c_est = _col(kk, "Estado de la sede")
+    if c_est is not None:
+        estados = _primero(zip(kk["_SBAN"].astype(str),
+                               kk[c_est].fillna("").astype(str)))
+        finalizadas_n = sum(1 for v in estados.values() if v == "Finalizada")
+    reportadas_ap = finalizadas_ap = 0
+    c_ap = _col(kk, "ESTADO UPS")
+    if c_ap is not None:
+        ups = _primero(zip(kk["_SBAN"].astype(str),
+                           kk[c_ap].apply(normalizar_estado_ups)))
+        reportadas_ap = len(ups)
+        finalizadas_ap = sum(1 for v in ups.values() if v == "Finalizada")
+    return universo, finalizadas_n, reportadas_ap, finalizadas_ap
+
+
+def tarjetas_destacadas(datos: pd.DataFrame, kpi_campos=None, seleccion=None,
+                        solo_pendientes: bool = False):
+    """KPIs destacados: oficinas intervenidas (Campos col N) y avance MT3 con barra.
+
+    El conteo de equipos intervenidos NO se repite aqui: ya esta en las tarjetas KPI
+    (Realizados / Pendientes), para no mostrar la misma cifra dos veces.
+    El conteo de oficinas sale de `oficinas_campos()`, la misma fuente que usan las
+    tarjetas de indicadores: asi las dos cifras coinciden siempre.
+    """
+    t = tema_actual()
+    if datos is None or len(datos) == 0:
+        return
+
+    def fmt(n) -> str:
+        return f"{int(n):,}".replace(",", ".")
+
+    if solo_pendientes and "_pendiente" in datos.columns:
+        datos = datos[datos["_pendiente"]]
+
+    universo, n_ofi_int, _rep_ap, _fin_ap = oficinas_campos(kpi_campos, seleccion)
+    n_ofi = len(universo) or int(datos["_SBAN"].nunique())
+    n_reg = int(datos["Regional"].nunique()) if "Regional" in datos.columns else 0
+    if not universo:          # respaldo si Campos no está disponible
+        try:
+            g_of = datos.groupby("_SBAN")["_mt"].agg(["size", "sum"])
+            n_ofi_int = int((g_of["sum"] > 0).sum())
+        except Exception:  # noqa: BLE001
+            n_ofi_int = n_ofi
+    total = int(len(datos))
+    realizados = int(datos["_mt"].sum())
+    avance = (realizados / total * 100) if total else 0.0
+    av_txt = f"{avance:.1f}".replace(".", ",") + " %"
+
+    serie: list = []
+    if "Fecha de mantenimiento 3" in datos.columns:
+        f = pd.to_datetime(datos.loc[datos["_mt"], "Fecha de mantenimiento 3"],
+                           errors="coerce").dropna()
+        if not f.empty:
+            serie = f.dt.date.value_counts().sort_index().values.tolist()
+    spark = _sparkline_svg(serie, t["verde"])
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(
+            f'<div class="kd"><div class="kd-lbl">🏢 Oficinas intervenidas</div>'
+            f'<div class="kd-num">{fmt(n_ofi_int)}</div>'
+            f'<div class="kd-sub">de {fmt(n_ofi)} oficinas del archivo'
+            + (f' · {n_reg} regionales' if n_reg else '') + '</div></div>',
+            unsafe_allow_html=True)
+    with c2:
+        st.markdown(
+            f'<div class="kd"><div class="kd-lbl">📈 Avance MT3</div>'
+            f'<div class="kd-num">{av_txt}</div>'
+            f'<div class="kd-bar"><i style="width:{max(0.0, min(100.0, avance)):.1f}%;'
+            f'background:{t["verde"]}"></i></div>'
+            f'<div class="kd-sub">{fmt(realizados)} de {fmt(total)} equipos</div></div>',
+            unsafe_allow_html=True)
+
+
 def render_kpis(datos: pd.DataFrame):
     """Tarjetas KPI del filtro activo (módulo + sidebar + clic del ranking).
 
@@ -1763,7 +1914,7 @@ def render_kpis(datos: pd.DataFrame):
               delta_color="inverse", help="Total de elementos − Realizados", border=True)
     c4.metric("🏦 Facturables (Si)", f"{fact_si:,}".replace(",", "."),
               help="Elementos atribuibles a BANCO", border=True)
-    c5.metric("🏢 No facturables (No)", f"{fact_no:,}".replace(",", "."),
+    c5.metric("🏢 No facturables", f"{fact_no:,}".replace(",", "."),
               help="Elementos de gestión COLSOF", border=True)
     return total, realizados, pendientes, fact_si, fact_no
 
@@ -1797,13 +1948,9 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
     if solo_pendientes and "_pendiente" in b.columns:
         b = b[b["_pendiente"]]
 
-    # Universo único: oficinas (SBAN) de Campos dashboard
-    if kpi_campos is not None and not getattr(kpi_campos, "empty", True) \
-            and _col(kpi_campos, "SBAN"):
-        sban_campos = kpi_campos[_col(kpi_campos, "SBAN")].apply(_pad5)
-        sban_campos = sban_campos[sban_campos.astype(str).str.len() > 0]
-        universo = set(sban_campos)
-    else:
+    # Universo y cifras oficiales: fuente ÚNICA compartida con tarjetas_destacadas()
+    universo, fin_n, rep_ap, fin_ap = oficinas_campos(kpi_campos, seleccion, click_sban)
+    if not universo:
         universo = set(df["_SBAN"].astype(str))
     n_universo = len(universo)
     n_filtro = len({s for s in b["_SBAN"].astype(str)} & universo) if len(b) else 0
@@ -1856,28 +2003,15 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
                    delta=f"{pct:.0f}% completas", help=ayuda, border=True)
 
     with cols[3]:
-        if kpi_campos is not None and not getattr(kpi_campos, "empty", True):
-            c_est = _col(kpi_campos, "Estado de la sede")
-            c_sb = _col(kpi_campos, "SBAN")
-            kk = kpi_campos.copy()
-            if c_sb:
-                kk["_SBAN"] = kk[c_sb].apply(_pad5)
-                if seleccion:
-                    sbans = {str(s).split(" - ")[0] for s in seleccion}
-                    kk = kk[kk["_SBAN"].isin(sbans)]
-                if click_sban:
-                    kk = kk[kk["_SBAN"].eq(click_sban)]
-            vals = (kk[c_est].fillna("").astype(str).str.strip()
-                    if c_est else pd.Series([], dtype=str))
-            fin = int((vals == "Finalizada").sum())
-            tot = int(len(vals))
-            pct = (fin / tot * 100) if tot else 0.0
+        if universo and _col(kpi_campos, "Estado de la sede") is not None:
+            tot = n_universo
+            pct = (fin_n / tot * 100) if tot else 0.0
             cols[3].metric(
-                "🏁 Oficinas finalizadas (Campos N)", f"{fin} / {tot}",
+                "🏁 Oficinas finalizadas (Campos N)", f"{fin_n} / {tot}",
                 delta=f"{pct:.0f}% del archivo",
                 help="Estado OFICIAL de la sede: columna N ('Estado de la sede') de Campos "
-                     "dashboard, contada por SBAN único. 'Reprogramada_Finalizada' se contabiliza "
-                     "aparte. Es la métrica de referencia de avance por oficina.",
+                     "dashboard, contada por SBAN único (la misma cifra que la tarjeta "
+                     "«Oficinas intervenidas»). 'Reprogramada_Finalizada' se contabiliza aparte.",
                 border=True,
             )
         else:
@@ -1888,28 +2022,15 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
     # El conteo calculado con la Data (100% MT3) NO se repite aquí: vive como alerta
     # y en el desplegable de conciliación de la pestaña 🔋 Avance UPS (col AP).
     with cols[4]:
-        c_ups_ap = _col(kpi_campos, "ESTADO UPS") if kpi_campos is not None else None
-        if c_ups_ap is not None and not getattr(kpi_campos, "empty", True):
-            ku = kpi_campos.copy()
-            c_sb_u = _col(ku, "SBAN")
-            if c_sb_u:
-                ku["_SBAN"] = ku[c_sb_u].apply(_pad5)
-                if seleccion:
-                    sbans = {str(s).split(" - ")[0] for s in seleccion}
-                    ku = ku[ku["_SBAN"].isin(sbans)]
-                if click_sban:
-                    ku = ku[ku["_SBAN"].eq(click_sban)]
-            api = ku[c_ups_ap].apply(normalizar_estado_ups)
-            fin_u = int(api.eq("Finalizada").sum())
-            rep_u = int(api.astype(str).str.strip().ne("").sum())
+        if rep_ap or fin_ap:
             con_ups = set(df.loc[df["_componente"].eq("UPS"), "_SBAN"].astype(str))
-            pend_u = len(con_ups - set(ku.loc[api.ne(""), "_SBAN"].astype(str)))
+            pend_u = len(con_ups - set(universo))
             cols[4].metric(
-                "🔋 UPS finalizadas (col AP)", f"{fin_u}",
-                delta=f"{fin_u/rep_u*100:.0f}% de las reportadas" if rep_u else None,
-                help="Fuente OFICIAL del avance UPS: columna AP «ESTADO UPS» de Campos dashboard. "
-                     f"Reportadas: {rep_u} de {len(ku)} oficinas. "
-                     f"{pend_u} oficina(s) con UPS siguen sin dato en esa columna. "
+                "🔋 UPS finalizadas (col AP)", f"{fin_ap}",
+                delta=f"{fin_ap/rep_ap*100:.0f}% de las reportadas" if rep_ap else None,
+                help="Fuente OFICIAL del avance UPS: columna AP «ESTADO UPS» de Campos dashboard, "
+                     f"contada por SBAN único. Reportadas: {rep_ap} de {n_universo} oficinas. "
+                     f"{pend_u} oficina(s) con UPS no están en el archivo. "
                      "El avance calculado con la Data (100% MT3) no se repite aquí: se usa como "
                      "alerta de consistencia en la pestaña 🔋 Avance UPS (col AP).",
                 border=True,
@@ -2967,6 +3088,8 @@ def main():
                          key="vista_v2")
     vista = vista or "Operativa"
     if vista == "Ejecutiva":
+        # Mismo bloque de KPIs principales que la vista operativa (lenguaje visual unificado)
+        tarjetas_destacadas(filtrado, kpi_campos, seleccion, solo_pendientes)
         render_vista_ejecutiva(filtrado, df, seleccion, f_attr,
                                st.session_state.get("click_sban"))
         st.markdown("---")
@@ -2988,7 +3111,13 @@ def main():
             for msg in avisos:
                 st.warning(msg)
 
+    # --- KPIs PRINCIPALES (de primera): oficinas, % de avance y equipos impactados ---
+    tarjetas_destacadas(filtrado, kpi_campos, seleccion, solo_pendientes)
+
+    # --- KPIs de detalle ---
     render_kpis(filtrado)
+    render_kpis_oficinas(df, seleccion, f_attr, st.session_state.get("click_sban"), kpi_campos)
+    avance_filtro = float(filtrado["_mt"].mean() * 100) if len(filtrado) else 0.0
     render_kpis_oficinas(df, seleccion, f_attr, st.session_state.get("click_sban"),
                          kpi_campos, cod_mod=cod_mod, solo_pendientes=solo_pendientes)
 

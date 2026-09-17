@@ -404,11 +404,17 @@ def _tipo_archivo(path) -> str:
     return ""
 
 
+def _es_xlsx_util(p: Path) -> bool:
+    """Descarta los temporales que Excel deja abiertos (`~$archivo.xlsx`)."""
+    return not p.name.startswith("~$")
+
+
 def _archivo_mas_reciente(carpeta: Path, tipo: str) -> Path | None:
     """Devuelve el .xlsx más reciente del tipo dado en la carpeta."""
     if not carpeta.exists():
         return None
-    archivos = [p for p in carpeta.glob("*.xlsx") if _tipo_archivo(p) == tipo]
+    archivos = [p for p in carpeta.glob("*.xlsx")
+                if _es_xlsx_util(p) and _tipo_archivo(p) == tipo]
     if not archivos:
         return None
     return max(archivos, key=lambda p: p.stat().st_mtime)
@@ -3075,4 +3081,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # INGESTA_SIN_APP=1 permite importar este módulo (para reutilizar sus validaciones
+    # desde ingesta.py) sin arrancar el panel de Streamlit.
+    if os.environ.get("INGESTA_SIN_APP") != "1":
+        main()

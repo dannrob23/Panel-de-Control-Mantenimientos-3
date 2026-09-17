@@ -205,9 +205,9 @@ Tus anotaciones se conservan al cambiar de filtro y puedes **exportarlas a CSV/E
 
 Hay **dos cosas distintas** que conviene no confundir:
 
-| | **Uploader** (barra lateral) | **Publicador** `ingesta_publicar.bat` |
+| | **Uploader** (barra lateral) | **Ingesta** `ingesta.bat` |
 |---|---|---|
-| Qué hace | Sube un `.xlsx` y el panel **local** muestra esos datos | Copia los Excel a `data/` y hace **commit + push** |
+| Qué hace | Sube un `.xlsx` y el panel **local** muestra esos datos | Ajusta columnas, valida, copia a `data/` y hace **commit + push** |
 | ¿Actualiza la web pública? | ❌ **NO** | ✅ **SÍ** (la nube se actualiza sola en 1-2 min) |
 | De dónde toma los archivos | Lo que subes | Carpeta hermana `Documents\Ingesta de datos diaria\` |
 
@@ -222,8 +222,25 @@ Sin ese archivo, el panel se ve como la vista pública (solo consulta).
 1. Guarda los Excel del día (Data, Cronograma, Campos) en la carpeta **`Ingesta de datos diaria`**
    (hermana del proyecto). El archivo **Campos dashboard** debe traer la hoja `Dashboard_KPI` con la
    columna **AP «ESTADO UPS»** y la hoja `Novedades Equipos` (novedades de las oficinas).
-2. Doble clic en **`ingesta_publicar.bat`** → copia, actualiza la fecha/hora y sube a GitHub.
+2. Doble clic en **`ingesta.bat`** (en la carpeta del proyecto) y elige la opción **2**.
+   El script toma el archivo más reciente de cada tipo, ignora los temporales `~$` de Excel,
+   ajusta las columnas, valida contra las reglas del panel, escribe `data\` y `deploy_panel\data\`,
+   y finalmente hace el **commit + push**.
 3. Espera 1-2 minutos y recarga la página pública con **Ctrl+F5**: la fecha del chip `🕒` debe cambiar.
+
+### Las 4 opciones del menú
+
+| Opción | Cuándo usarla |
+|---|---|
+| **1 · Revisar y generar** | Para ver el resumen y validar antes de publicar (no sube nada) |
+| **2 · Generar y PUBLICAR** | El uso normal del día |
+| **3 · Solo analizar columnas** | Cuando quieres revisar qué trae un Excel nuevo (`tools\analisis_ingesta.md`) |
+| **4 · Solo copia local** | Para probar en tu PC sin tocar la versión publicada |
+
+> 🧩 **Si necesitas analizar o ajustar una columna**, no hay que programar: abre `ingesta.py`,
+> busca la sección `1) CONFIGURACION` y edita `ANALISIS_COLUMNAS`
+> (por ejemplo `"Oficina": {"tipo": "texto"}` o `"reemplazar": {"SI": "Si"}`).
+> El detalle está en el README, sección *Actualización diaria de datos*.
 
 ### Actualizar el proyecto en otro equipo
 Doble clic en **`actualizar_panel.bat`** (trae los últimos cambios del repositorio).
@@ -235,8 +252,8 @@ Doble clic en **`actualizar_panel.bat`** (trae los últimos cambios del reposito
 | Síntoma | Causa probable | Solución |
 |---|---|---|
 | No veo la opción de subir archivos | Estás en modo consulta (o es la URL pública) | Es lo correcto. Para cargar, hazlo en el PC del administrador |
-| Subí un archivo y la web no cambia | El uploader **no publica** | Ejecuta `ingesta_publicar.bat` |
-| La fecha de actualización no avanza | No se ejecutó el publicador o el push falló | Ejecuta el `.bat` y revisa que diga "push" sin errores |
+| Subí un archivo y la web no cambia | El uploader **no publica** | Ejecuta `ingesta.bat` → opción 2 |
+| La fecha de actualización no avanza | No se ejecutó la ingesta o el push falló | Ejecuta `ingesta.bat` → opción 2 y revisa que diga "Push realizado" |
 | Veo seriales como `***1234` | Modo público (enmascarado) | Es normal en la vista pública |
 | Los totales no cuadran | Hay filtros activos | Mira los chips de "Filtros activos" o pulsa 🧹 Limpiar filtros |
 | "Datos de hace N días" | La data no se ha actualizado | Publicar la data nueva con el `.bat` |

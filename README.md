@@ -99,24 +99,56 @@ streamlit run app.py            # http://localhost:8501
 
 ---
 
-## 📥 Actualización diaria de datos
+## 📥 Actualización diaria de datos (un solo script)
 
-El flujo **que publica** en la web es el publicador (no el uploader del panel):
+Todo el flujo vive en **`ingesta.py`** y se lanza con doble clic en **`ingesta.bat`**:
 
-1. Copiar los `.xlsx` del día (Data, Cronograma, Campos) en la carpeta hermana
-   **`..\Ingesta de datos diaria`**. El **Campos dashboard** debe traer la hoja `Dashboard_KPI`
-   con la columna **AP «ESTADO UPS»** y la hoja `Novedades Equipos`.
-2. Doble clic en **`ingesta_publicar.bat`** (dentro de `deploy_panel/`) → sincroniza `app.py` y la
-   documentación desde la raíz, **anonimiza** los datos a `data/`, escribe la **fecha/hora** en
-   `ultima_actualizacion.json` y hace `git commit/push`.
+| Opción | Comando | Qué hace |
+|---|---|---|
+| 1 | `python ingesta.py` | Lee, ajusta, valida y escribe `data/` + `deploy_panel/data/` (**no publica**) |
+| 2 | `python ingesta.py --publicar` | Igual + `git commit/push` → Streamlit Cloud redespliega |
+| 3 | `python ingesta.py --analisis` | Solo genera el reporte de columnas `tools\analisis_ingesta.md` |
+| 4 | `python ingesta.py --solo-local` | Escribe solo en `data/` (no toca `deploy_panel/`) |
+| — | `python ingesta.py --seco` | Escribe todo pero **no** sube a GitHub |
+
+1. Copiar los `.xlsx` del día en la carpeta hermana **`..\Ingesta de datos diaria`** (el script toma
+   automáticamente el más reciente de cada tipo y **descarta los temporales `~$…`** de Excel abiertos).
+2. Doble clic en **`ingesta.bat`** → opción **2**.
 3. Streamlit Cloud redespliega (1-2 min) y el panel muestra el nuevo `🕒 Última actualización`.
+
+### Qué se puede editar (sin tocar la lógica)
+
+Al inicio de `ingesta.py` está la sección **`1) CONFIGURACION`**:
+
+| Constante | Para qué |
+|---|---|
+| `ANONIMIZAR` | `True`: seriales → `H_xxx` y placas → `****1234` antes de publicar |
+| `COLUMNAS_CONSERVAR` | Qué columnas se publican (lo demás se descarta: web más liviana) |
+| `COLUMNAS_PERSONALES` | Datos que **nunca** se publican (nombres, cédulas, correos) |
+| `ANALISIS_COLUMNAS` | Ajuste por columna: `texto`, `fecha`, `numero`, `mayus`, `titulo` y `reemplazar` |
+| `COLUMNAS_OBLIGATORIAS` | Si falta alguna, el script **detiene la publicación** para no romper el panel |
+| `SHEETS_POR_TIPO` | Qué hojas se conservan de cada Excel |
+| `NOMBRES_DESTINO` | Nombre con el que se publica cada archivo |
+| `CONFIG_GIT` | Autor de los commits, backend TLS (`openssl`) y ruta del Credential Manager |
+
+> 🔑 **Credenciales de GitHub**: el script usa las credenciales que ya tenga guardadas el
+> *Git Credential Manager* del equipo (una sola vez: `git push` manual y autenticarse).
+> Si el helper no puede ejecutarse (por ejemplo en una consola no interactiva), el script
+> reintenta con la credencial guardada e **inyecta el token sin mostrarlo en pantalla**.
+> En este equipo `schannel` falla con `SEC_E_NO_CREDENTIALS`: por eso `CONFIG_GIT["ssl_backend"]`
+> está en `openssl`.
+
+Para analizar una columna nueva: ejecuta la opción **3**, abre `tools\analisis_ingesta.md`
+(columnas, % de datos y valores más frecuentes) y agrega el ajuste en `ANALISIS_COLUMNAS`.
+Las columnas obligatorias están marcadas con `[CLAVE]`: si las quitas de `COLUMNAS_CONSERVAR`,
+el script se detiene con un mensaje claro en vez de romper el panel.
 
 > ⚠️ El **uploader** de la barra lateral (modo admin) sirve para *ver* datos en local, **no publica**.
 > Además, en Streamlit Cloud el disco es efímero: lo subido por esa vía se pierde en el próximo reinicio.
 
 > 🔎 Si el `push` falla por credenciales de GitHub (`SEC_E_NO_CREDENTIALS`), abre Git Bash/CMD,
 > ejecuta `git -C deploy_panel push origin main` e introduce tu usuario y token una vez; los commits
-> ya quedan hechos y solo falta subirlos.
+> ya quedan hechos y solo falta subirlos. El script también lo intenta solo con la credencial guardada.
 
 ---
 
@@ -132,10 +164,10 @@ o pedir ayuda.
 
 ```
 app.py                     Aplicación principal (Streamlit)
+ingesta.py / ingesta.bat   Ingesta diaria: ajusta columnas, valida, publica y hace push
 TUTORIAL.md                Guía de uso para usuarios y administradores
-ingesta_publicar.py/.bat   Publicador diario (copia a data/ + commit/push)
 actualizar_panel.bat       Trae los últimos cambios del repositorio (git pull)
-sanitizar_publico.py       Utilidad de saneado de datos para vistas públicas
+tools/analisis_ingesta.md  Reporte de columnas de los Excel del día (lo genera ingesta.py)
 data/                      Excel vigentes + ultima_actualizacion.json
 .streamlit/config.toml     Tema base y configuración del servidor
 .streamlit/secrets.toml    🔒 Local (ignorado por git): modo_admin / modo_publico

@@ -18,18 +18,31 @@ Reglas:
 import warnings
 warnings.simplefilter("ignore")
 import os
+from datetime import timezone
 
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
+try:
+    import zoneinfo
+    TZ_BO = zoneinfo.ZoneInfo("America/Bogota")
+except Exception:
+    TZ_BO = timezone.utc
+
+def ahora() -> pd.Timestamp:
+    return pd.Timestamp.now(tz=TZ_BO).tz_convert(None)
+
+def hoy() -> pd.Timestamp:
+    return ahora().normalize()
+
 BASE = os.path.dirname(os.path.abspath(__file__))
 CRONO = os.path.join(BASE, "Cronograma Mto Preventivo 3 _ Equipos 1.xlsx")
 DATA = os.path.join(BASE, "Data_PCTriage.xlsx")
 OUT = os.path.join(BASE, "Cumplimiento_Cronograma_MT3.xlsx")
 
-FECHA_REF = pd.Timestamp.now().normalize()
+FECHA_REF = hoy()
 CATS = ["Equipo de escritorio", "Equipo portátil", "Escáner", "Impresora",
         "Lector biométrico", "Lector de banda pin pad", "Lector de código",
         "Monitor", "PAD de firmas", "Servidor", "Tablet"]

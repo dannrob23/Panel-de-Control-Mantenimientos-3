@@ -6,7 +6,18 @@ Reglas: AN='Si' -> BANCO | AN='No' -> COLSOF | Pendientes = Elementos - Con MT3
 """
 import json
 import os
+from datetime import timezone
+
 import pandas as pd
+
+try:
+    import zoneinfo
+    TZ_BO = zoneinfo.ZoneInfo("America/Bogota")
+except Exception:
+    TZ_BO = timezone.utc
+
+def ahora() -> pd.Timestamp:
+    return pd.Timestamp.now(tz=TZ_BO).tz_convert(None)
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(BASE, "Data_PCTriage.xlsx")
@@ -106,7 +117,7 @@ resumen = {
     "conColsof": int(((df["F"] == "No") & df["tiene"]).sum()),
     "tickets": int(df["G"].dropna().nunique()),
     "valor": float(df.loc[df["F"] == "Si", "Valor facturación"].sum()),
-    "generado": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
+    "generado": ahora().strftime("%Y-%m-%d %H:%M"),
 }
 
 data = {"resumen": resumen, "control": control, "faltantes": faltantes,

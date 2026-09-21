@@ -21,17 +21,32 @@ Para analizar una columna nueva: ejecuta `--analisis`, mira el reporte
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+
+# ----------------------------------------------------------------------------
+# Zona horaria oficial: América/Bogotá (UTC-5) — Bogotá, Lima, Quito
+# ----------------------------------------------------------------------------
+try:
+    import zoneinfo
+    TZ_BO = zoneinfo.ZoneInfo("America/Bogota")
+except Exception:
+    TZ_BO = timezone.utc
+
+def ahora() -> datetime:
+    """datetime actual en zona horaria de Bogotá (UTC-5), naive."""
+    return datetime.now(tz=TZ_BO).replace(tzinfo=None)
 
 # =============================================================================
 # 1) CONFIGURACION  <<<<<<  EDITA SOLO ESTA SECCION
@@ -79,8 +94,8 @@ COLUMNAS_PERSONALES = {
 # ⚠️ NO quites las columnas marcadas con [CLAVE]: el panel las necesita para funcionar.
 COLUMNAS_CONSERVAR = {
     "data": ["Serial", "Placa", "Categoría", "Modelo", "SBAN", "Oficina",     # [CLAVE]
-             "Tipo ubicación", "Regional", "Consecutivo mantenimiento 3",     # [CLAVE]
-             "Fecha de mantenimiento 3", "Estado", "Estado interno", "Facturable"],
+             "Regional", "Consecutivo mantenimiento 3",                       # [CLAVE]
+             "Fecha de mantenimiento 3", "Facturable"],                       # [CLAVE]
     "campos": {
         "Dashboard_KPI": ["SBAN", "Nombre Oficina", "Fecha Inicio", "Fecha Fin",
                           "Estado de la sede", "ESTADO UPS", "OBSERVACIONES", "UPS"],
@@ -96,9 +111,11 @@ COLUMNAS_CONSERVAR = {
 }
 
 # Ajustes por COLUMNA: quitar espacios, unificar mayusculas, convertir a fecha/numero,
-# reemplazar textos escritos de varias formas, etc. Se aplican en orden.
+# reemplazar textos escritos de varias formas, etc.
 #   tipo: "texto" (quita espacios) · "fecha" · "numero" · "mayus" · "titulo"
 #   reemplazar: {valor_que_viene: valor_que_quiero}
+# Si el tipo tiene VARIAS hojas, usa "_comunes" (aplica a todas) y el nombre de la hoja
+# para lo particular. Los ajustes nunca se aplican a hojas que no los necesitan.
 ANALISIS_COLUMNAS = {
     "data": {
         "Oficina": {"tipo": "texto"},
@@ -111,17 +128,39 @@ ANALISIS_COLUMNAS = {
         "Fecha de mantenimiento 3": {"tipo": "fecha"},
     },
     "campos": {
-        "Estado de la sede": {"tipo": "texto",
-                              "reemplazar": {"finalizada": "Finalizada",
-                                             "reprogramada_finalizada": "Reprogramada_Finalizada",
-                                             "en proceso": "En proceso",
-                                             "programada": "Programada"}},
-        "ESTADO UPS": {"tipo": "texto",
-                       "reemplazar": {"finalizada": "Finalizado",
-                                      "finalizado": "Finalizado",
-                                      "FINALIZADO": "Finalizado"}},
-        "Nombre Oficina": {"tipo": "texto"},
+        "_comunes": {
+            "Nombre Oficina": {"tipo": "texto"},
+        },
+        "Dashboard_KPI": {
+            "Estado de la sede": {"tipo": "texto",
+                                  "reemplazar": {"finalizada": "Finalizada",
+                                                 "reprogramada_finalizada": "Reprogramada_Finalizada",
+                                                 "en proceso": "En proceso",
+                                                 "programada": "Programada"}},
+            "ESTADO UPS": {"tipo": "texto",
+                           "reemplazar": {"finalizada": "Finalizado",
+                                          "finalizado": "Finalizado",
+                                          "FINALIZADO": "Finalizado",
+                                          "en proceso": "En proceso"}},
+        },
+        "Novedades Equipos": {
+            "Categoria  Novedad": {"tipo": "texto"},
+            "Fecha": {"tipo": "fecha"},
+            "SBAN": {"tipo": "texto"},
+        },
     },
+}
+
+# Publicacion en GitHub (se usa al elegir la opcion 2 / --publicar)
+CONFIG_GIT = {
+    "usuario": "dannrob23",                          # autor de los commits
+    "correo": "dannrob23@users.noreply.github.com",
+    "ssl_backend": "openssl",   # 'openssl' o 'schannel'. En este equipo schannel da
+                                # error SEC_E_NO_CREDENTIALS al conectar con GitHub.
+    "prompt": False,            # True = permite pedir credenciales por consola
+    # Ruta del Git Credential Manager (para reintentar el push sin consola).
+    # Dejar "" para no usarlo.
+    "credential_manager": r"C:\Users\darobles\AppData\Local\hermes\git\mingw64\bin\git-credential-manager.exe",
 }
 
 # Columnas SIN las cuales el panel no funciona: se avisa y se detiene.
@@ -228,12 +267,31 @@ def elegir_archivos(origen: Path) -> dict:
 # =============================================================================
 # 3) LECTURA Y AJUSTE DE COLUMNAS
 # =============================================================================
-def aplicar_ajustes(df: pd.DataFrame, ajustes: dict) -> pd.DataFrame:
-    """Aplica la configuracion ANALISIS_COLUMNAS a un DataFrame."""
+def ajustes_de(tipo: str, hoja: str) -> dict:
+    """Devuelve los ajustes que aplican a una hoja concreta.
+
+    Admite dos formatos en ANALISIS_COLUMNAS:
+      - plano:            {"columna": {...}}                  (una sola hoja)
+      - por hoja:         {"_comunes": {...}, "Hoja1": {...}} (varias hojas)
+    """
+    config = ANALISIS_COLUMNAS.get(tipo) or {}
+    if not config:
+        return {}
+    if any(isinstance(v, dict) and ("tipo" in v or "reemplazar" in v)
+           for v in config.values()):
+        return config                                  # formato plano
+    comunes = config.get("_comunes") or {}
+    particulares = config.get(hoja) or {}
+    return {**comunes, **particulares}
+
+
+def aplicar_ajustes(df: pd.DataFrame, ajustes: dict, etiqueta: str = "") -> pd.DataFrame:
+    """Aplica la configuracion de columnas a un DataFrame."""
     for nombre, regla in (ajustes or {}).items():
         col = buscar_columna(df, nombre)
         if col is None:
-            print(f"    · aviso: no encontre la columna '{nombre}' (se omite el ajuste)")
+            print(f"    · aviso: no encontre la columna '{nombre}'"
+                  f"{f' en {etiqueta}' if etiqueta else ''} (se omite el ajuste)")
             continue
         tipo = str(regla.get("tipo", "texto")).lower()
         if tipo == "fecha":
@@ -271,9 +329,11 @@ def conservar_columnas(df: pd.DataFrame, tipo: str, hoja: str) -> pd.DataFrame:
     return df[presentes] if presentes else df
 
 
-def quitar_personales(df: pd.DataFrame, tipo: str) -> pd.DataFrame:
-    """Elimina columnas con datos personales antes de publicar."""
-    blandas = COLUMNAS_PERSONALES.get(tipo) or []
+def quitar_personales(df: pd.DataFrame, tipo: str, hoja: str = "") -> pd.DataFrame:
+    """Elimina columnas con datos personales (siempre manda sobre COLUMNAS_CONSERVAR)."""
+    blandas = list(COLUMNAS_PERSONALES.get(tipo) or [])
+    if isinstance(COLUMNAS_PERSONALES.get(tipo), dict):
+        blandas = list((COLUMNAS_PERSONALES[tipo].get(hoja) or []))
     quitar = [c for c in df.columns if any(normalizar_nombre(c) == normalizar_nombre(b)
                                            for b in blandas)]
     if quitar:
@@ -310,9 +370,9 @@ def preparar_hoja(path: Path, tipo: str, hoja: str) -> pd.DataFrame:
     """Lee una hoja y le aplica todo el flujo de ajuste."""
     df = pd.read_excel(path, sheet_name=hoja)
     print(f"    · {hoja}: {len(df):,} filas x {len(df.columns)} columnas".replace(",", "."))
-    df = aplicar_ajustes(df, ANALISIS_COLUMNAS.get(tipo))
+    df = aplicar_ajustes(df, ajustes_de(tipo, hoja), f"{tipo}/{hoja}")
     df = conservar_columnas(df, tipo, hoja)
-    df = quitar_personales(df, tipo)
+    df = quitar_personales(df, tipo, hoja)
     df = anonimizar(df, tipo)
     return df
 
@@ -365,11 +425,15 @@ def validar_con_el_panel(tipo: str, hojas: dict) -> list:
         try:
             origen.to_excel(temporal, index=False, sheet_name="Hoja1")
             df = app._cargar_y_preparar(str(temporal), os.path.getmtime(temporal))
+            df["_componente"] = app.clasificar_componente(df)   # igual que hace el panel
             avisos.append(f"{len(df):,} equipos · componentes "
                           f"{df['_componente'].value_counts().to_dict()}".replace(",", "."))
             dup = int(df["Serial"].duplicated().sum())
             if dup:
                 avisos.append(f"{dup} Serial(es) duplicado(s) — 1 fila debe ser 1 equipo")
+            sin_sban = int(df["_SBAN"].astype(str).str.len().eq(0).sum())
+            if sin_sban:
+                avisos.append(f"{sin_sban} fila(s) sin SBAN (no se pueden ubicar por oficina)")
         except Exception as exc:  # noqa: BLE001
             avisos.append(f"no pude validar la Data como lo hace el panel: {exc}")
         finally:
@@ -405,7 +469,7 @@ def validar_con_el_panel(tipo: str, hojas: dict) -> list:
 # =============================================================================
 def analizar(origen: Path, archivos: dict) -> None:
     """Genera tools/analisis_ingesta.md con columnas, llenado y valores frecuentes."""
-    lineas = [f"# Analisis de la ingesta - {datetime.now():%Y-%m-%d %H:%M}", ""]
+    lineas = [f"# Analisis de la ingesta - {ahora():%Y-%m-%d %H:%M}", ""]
     lineas.append(f"Carpeta de origen: `{origen}`")
     lineas.append("")
     for tipo, path in archivos.items():
@@ -456,7 +520,7 @@ def escribir(destino: Path, tipo: str, hojas: dict) -> Path:
 def escribir_metadatos(destino_data: Path, detalle: dict) -> None:
     """Escribe ultima_actualizacion.json (fecha/hora, hashes y conteos)."""
     meta = {
-        "fecha_hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "fecha_hora": ahora().strftime("%Y-%m-%d %H:%M:%S"),
         "organizacion": ORGANIZACION,
         "anonimizado": bool(ANONIMIZAR),
         "archivos": {},
@@ -511,10 +575,68 @@ def sincronizar_app() -> None:
                 print(f"  ↑ {nombre}")
 
 
+def _entorno_git() -> dict:
+    """Entorno para git: sin prompts y con TLS OpenSSL.
+
+    En este equipo el backend TLS `schannel` de git falla con
+    'SEC_E_NO_CREDENTIALS' al conectar con GitHub; con OpenSSL funciona.
+    Se puede cambiar en CONFIG_GIT['ssl_backend'].
+    """
+    entorno = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    backend = CONFIG_GIT.get("ssl_backend", "openssl")
+    if backend:
+        entorno["GIT_CONFIG_COUNT"] = "1"
+        entorno["GIT_CONFIG_KEY_0"] = "http.sslBackend"
+        entorno["GIT_CONFIG_VALUE_0"] = backend
+    if not CONFIG_GIT.get("prompt", False):
+        entorno["GCM_INTERACTIVE"] = "never"
+    return entorno
+
+
 def _git(args: list) -> int:
     codigo = subprocess.run(["git"] + args, cwd=str(APP_DEPLOY),
-                            capture_output=True, text=True)
+                            capture_output=True, text=True,
+                            encoding="utf-8", errors="replace",
+                            env=_entorno_git())
     salida = (codigo.stdout or "") + (codigo.stderr or "")
+    if salida.strip():
+        print("    " + salida.strip()[:900])
+    return codigo.returncode
+
+
+def _credencial_github():
+    """Toma usuario y token guardados por Git Credential Manager (si existen).
+
+    Devuelve (usuario, token) o (None, None). El token NUNCA se imprime.
+    """
+    gcm = CONFIG_GIT.get("credential_manager", "")
+    if not gcm or not Path(gcm).exists():
+        return None, None
+    try:
+        p = subprocess.run([gcm, "get"], input="protocol=https\nhost=github.com\n\n",
+                           capture_output=True, text=True, timeout=30,
+                           env={**os.environ, "GCM_INTERACTIVE": "never"})
+        usuario = re.search(r"^username=(.+)$", p.stdout or "", re.M)
+        token = re.search(r"^password=(.+)$", p.stdout or "", re.M)
+        if token:
+            return (usuario.group(1).strip() if usuario else "x"), token.group(1).strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return None, None
+
+
+def _push(args: list, usuario: str, token: str) -> int:
+    """Push inyectando la credencial en la cabecera (evita el helper externo)."""
+    basico = base64.b64encode(f"{usuario}:{token}".encode()).decode()
+    entorno = _entorno_git()
+    entorno.update({"GIT_CONFIG_COUNT": "2",
+                    "GIT_CONFIG_KEY_0": "http.sslBackend",
+                    "GIT_CONFIG_VALUE_0": CONFIG_GIT.get("ssl_backend", "openssl"),
+                    "GIT_CONFIG_KEY_1": "http.https://github.com/.extraHeader",
+                    "GIT_CONFIG_VALUE_1": f"Authorization: Basic {basico}"})
+    codigo = subprocess.run(["git"] + args, cwd=str(APP_DEPLOY), capture_output=True,
+                            text=True, encoding="utf-8", errors="replace", env=entorno)
+    salida = ((codigo.stdout or "") + (codigo.stderr or "")).replace(token, "***")
     if salida.strip():
         print("    " + salida.strip()[:900])
     return codigo.returncode
@@ -527,9 +649,11 @@ def publicar_en_github(mensaje: str) -> bool:
         return False
     _git(["add", "-A"])
     estado = subprocess.run(["git", "status", "--porcelain"], cwd=str(APP_DEPLOY),
-                           capture_output=True, text=True).stdout.strip()
+                            capture_output=True, text=True,
+                            env=_entorno_git()).stdout.strip()
     if estado:
-        _git(["-c", "user.name=Panel MT3", "-c", "user.email=panel@local",
+        _git(["-c", f"user.name={CONFIG_GIT['usuario']}",
+              "-c", f"user.email={CONFIG_GIT['correo']}",
               "commit", "-m", mensaje])
     else:
         print("    (no hay cambios nuevos que commitear)")
@@ -537,10 +661,16 @@ def publicar_en_github(mensaje: str) -> bool:
     if _git(["push", "origin", "main"]) == 0:
         print("  ✅ Push realizado. Streamlit Cloud se actualiza en 1-2 minutos.")
         return True
-    print("  ❌ No se pudo subir a GitHub (normalmente falta iniciar sesion).")
-    print("     Solucion: abre CMD o Git Bash en deploy_panel y ejecuta:")
-    print("         git push origin main")
-    print("     Los commits ya quedaron hechos; solo falta autenticarte una vez.")
+    # Plan B: usar la credencial guardada directamente (util cuando el helper de git
+    # no puede ejecutarse, p. ej. en entornos sin consola interactiva).
+    print("  Reintentando con la credencial guardada…")
+    usuario, token = _credencial_github()
+    if token and _push(["push", "origin", "main"], usuario, token) == 0:
+        print("  ✅ Push realizado. Streamlit Cloud se actualiza en 1-2 minutos.")
+        return True
+    print("  ❌ No se pudo subir a GitHub.")
+    print("     Abre CMD o Git Bash y ejecuta una vez: git -C deploy_panel push origin main")
+    print("     Los commits ya quedaron hechos; solo falta subirlos.")
     return False
 
 
@@ -628,7 +758,7 @@ def main() -> int:
     # --- Publicar ---
     print("\n[4/4] Publicacion")
     if args.publicar and not args.solo_local:
-        ok = publicar_en_github(f"Ingesta diaria {datetime.now():%Y-%m-%d %H:%M}")
+        ok = publicar_en_github(f"Ingesta diaria {ahora():%Y-%m-%d %H:%M}")
         print("=" * 74)
         return 0 if ok else 3
     print("  (modo sin push: los archivos quedaron listos en data/ y deploy_panel/data/)")

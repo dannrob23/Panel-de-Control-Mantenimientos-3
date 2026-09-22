@@ -6,11 +6,29 @@ App Streamlit de un solo archivo. Fuente: Data_PCTriage.xlsx (hoja 'Hoja1').
 import hashlib
 import io
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+
+# ----------------------------------------------------------------------------
+# Zona horaria oficial: América/Bogotá (UTC-5) — Bogotá, Lima, Quito
+# ----------------------------------------------------------------------------
+try:
+    import zoneinfo
+    TZ_BO = zoneinfo.ZoneInfo("America/Bogota")
+except Exception:  # fallback si no está disponible zoneinfo
+    TZ_BO = timezone.utc  # se usa UTC como respaldo, pero se nota en logs
+
+def ahora() -> pd.Timestamp:
+    """Timestamp actual en zona horaria de Bogotá (UTC-5)."""
+    return pd.Timestamp.now(tz=TZ_BO).tz_convert(None)
+
+def hoy() -> pd.Timestamp:
+    """Fecha actual (medianoche) en zona horaria de Bogotá."""
+    return ahora().normalize()
 
 # ----------------------------------------------------------------------------
 # Configuración general de la página
@@ -249,7 +267,7 @@ def dias_desde_actualizacion():
         f = pd.to_datetime(leer_ultima_actualizacion(), errors="coerce")
         if pd.isna(f):
             return None
-        return int((pd.Timestamp.now().normalize() - f.normalize()).days)
+        return int((hoy() - f.normalize()).days)
     except Exception:  # noqa: BLE001
         return None
 
@@ -512,7 +530,7 @@ def leer_ultima_actualizacion() -> str:
     rutas = [Path(v) for v in rutas_activas().values() if v]
     marcas = [_mtime_carpeta(p) for p in rutas if Path(p).exists()]
     if marcas:
-        return pd.Timestamp.fromtimestamp(max(marcas)).strftime("%Y-%m-%d %H:%M")
+        return pd.Timestamp.fromtimestamp(max(marcas), tz=TZ_BO).tz_convert(None).strftime("%Y-%m-%d %H:%M")
     return "sin datos"
 
 
@@ -588,12 +606,12 @@ def _registrar_carga(tipo: str, archivo_original: str, destino: Path, sha: str, 
         if nuevo:
             w.writerow(["fecha_hora", "tipo", "archivo_original", "destino",
                         "sha256", "filas"])
-        w.writerow([pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+        w.writerow([ahora().strftime("%Y-%m-%d %H:%M:%S"),
                     tipo, archivo_original, destino.name, sha, filas])
 
 
 def _guardar_subida(uploaded, tipo: str, sufijo: str) -> Path:
-    destino = DIR_CARGA / f"{pd.Timestamp.now():%Y%m%d_%H%M%S}_{sufijo}.xlsx"
+    destino = DIR_CARGA / f"{ahora():%Y%m%d_%H%M%S}_{sufijo}.xlsx"
     destino.write_bytes(uploaded.getbuffer())
     sha = hashlib.sha256(uploaded.getbuffer()).hexdigest()
     _registrar_carga(tipo, uploaded.name, destino, sha)
@@ -779,18 +797,18 @@ def estados_ups(df: pd.DataFrame, cup: pd.DataFrame) -> dict:
     if "_SBAN" not in ups.columns:
         ups["_SBAN"] = ups["SBAN"].apply(_pad5)
     agg = ups.groupby("_SBAN").agg(Total=("Serial", "size"), MT=("_mt", "sum"))
-    hoy = pd.Timestamp.now().normalize()
+    hoy_local = hoy()
     out = {}
     for _, r in cup.iterrows():
         s = r["_SBAN"]
         fecha = r["Fecha plan"]
         tot = int(agg.loc[s, "Total"]) if s in agg.index else 0
         mt = int(agg.loc[s, "MT"]) if s in agg.index else 0
-        if pd.notna(fecha) and hoy < fecha:
+        if pd.notna(fecha) and hoy_local < fecha:
             out[s] = "Programada"
         elif tot > 0 and mt >= tot:
             out[s] = "Finalizada"
-        elif pd.notna(fecha) and fecha <= hoy:
+        elif pd.notna(fecha) and fecha <= hoy_local:
             out[s] = "En proceso"
         else:
             out[s] = "Programada"

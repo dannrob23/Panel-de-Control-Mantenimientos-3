@@ -43,13 +43,26 @@ Muestra, en tiempo real y de forma visual:
 │  Facturación  [Todos] [🏦 Facturables (BANCO)] [🏢 No facturables]    │  ← filtro visible
 │  📊 Del módulo (29.860 equipos): 🏦 22.230 · 🏢 7.630                 │
 │                                                                       │
-│  [📦 Total] [✅ MT] [⚠️ Pendientes] [🏦 Facturables] [🏢 No fact.]   │  ← tarjetas KPI
+│  [🏢 Oficinas intervenidas] [📈 Avance MT3]                           │  ← destacadas (titular)
+│  [📦 Total] [✅ MT] [⚠️ Pendientes] [🏦 Facturables] [🏢 No fact.]   │  ← KPI de equipos
+│  [C1/C2/UPS 100% MT3] [🏁 Finalizadas (N)] [🔋 UPS finalizadas (AP)] │  ← KPI de oficinas
 │                                                                       │
 │  📈 Gráficos y avance │ 🏢 Resumen por oficina │ 📋 Gestión novedades │  ← pestañas
 │  (con el módulo UPS se agregan: 🔋 Avance UPS (col AP) · 📰 Novedades de las oficinas)
 └──────────────────────────────────────────────────────────────────────┘
    ☰ Barra lateral: Datos · Filtros · Auditoría y fuentes
 ```
+
+### Ruta rápida: cómo leer el panel en 4 pasos
+
+1. **Elige el módulo** arriba: `Componente 1`, `Componente 2 (impresoras láser)` o `UPS`.
+2. **Mira las 2 tarjetas destacadas**: *Oficinas intervenidas* (¿cuántas sedes empezamos?) y
+   *Avance MT3* (¿qué % del módulo está hecho?).
+3. **Revisa los KPI**: el bloque de **equipos** (total / realizados / pendientes) y el de **oficinas**
+   (cuántas están al **100%** y cómo está el **estado oficial** de la sede).
+4. **Baja a las pestañas** para entender el *por qué*: en **📈 Gráficos y avance** ves el ranking
+   (¿quién acumula pendientes?), la **tendencia** (¿a qué ritmo vamos?) y el **mapa de calor**
+   (¿dónde se concentra el atraso?).
 
 ### Los "chips" del encabezado (siempre te dicen el estado)
 
@@ -89,12 +102,26 @@ Muestra, en tiempo real y de forma visual:
 Todas las tarjetas del panel están pensadas para que **cada dato se vea una sola vez**. Si un número
 no coincide con lo que esperabas, revisa primero el filtro 🏦/🏢 y los chips de filtros activos.
 
+### Tarjetas destacadas (las 2 grandes de arriba)
+
+Son el "titular" del panel: responden *¿cuántas oficinas ya trabajamos?* y *¿cuánto llevamos?*
+
+| Indicador | Qué mide | Cómo se calcula |
+|---|---|---|
+| 🏢 **Oficinas intervenidas** | Oficinas del **módulo activo** donde ya se empezó (al menos **1** MT3) | SBAN distintos con `≥1 MT3` ÷ SBAN distintos del módulo. **No** es el estado oficial de la sede |
+| 📈 **Avance MT3** | % de equipos ya subsanados en el filtro activo (con su barra) | `realizados ÷ total` |
+
+> ⚠️ **No confundir** *intervenida* con *100%*:
+> **intervenida** = ya empezaron (aunque sea 1 equipo) · **100% MT3** = terminaron **todos** los equipos.
+> Ejemplo real (Componente 1): **381 de 808** oficinas intervenidas, pero solo **265 de 806** están al 100%.
+> Por eso la primera cifra siempre es **mayor** que la segunda.
+
 ### Equipos del módulo (5 tarjetas)
 
 | Indicador | Qué mide |
 |---|---|
 | 📦 **Total de elementos** | Equipos que cumplen los filtros actuales |
-| ✅ **Mantenimientos realizados (MT)** | Equipos con consecutivo MT3 asignado (subsanados) · el delta muestra el **% de avance** |
+| ✅ **Mantenimientos realizados (MT)** | Equipos con consecutivo MT3 asignado (subsanados). El **% de avance** está en la tarjeta destacada 📈 (no se repite aquí) |
 | ⚠️ **Mantenimientos pendientes** | Equipos sin consecutivo MT3 (y su % sobre el total) |
 | 🏦 **Facturables (Si)** | Equipos atribuibles al Banco |
 | 🏢 **No facturables (No)** | Equipos de gestión COLSOF |
@@ -139,11 +166,54 @@ los **mismos filtros** (Oficina · Facturación · clic del ranking · solo pend
 ## 7. Las pestañas
 
 ### 📈 Gráficos y avance
-- **Dona**: subsanados vs. pendientes
-- **Taquímetro**: % de avance global
-- **Ranking de sedes**: las que tienen más pendientes (puedes mostrar 5, 10, 12, 15, 20 o 25)
-- **Tendencia MT3**: mantenimientos realizados por día
-- **Mapa de calor**: Regional × Estado
+
+Esta pestaña responde a tres preguntas: **¿cuánto llevamos?**, **¿quién va atrasado?** y
+**¿dónde se concentra el pendiente?** Todos los gráficos reaccionan a los filtros activos.
+
+#### 🍩 Dona — "Avance de Mantenimiento Preventivo 3"
+- **Qué muestra:** dos porciones sobre el total de equipos del filtro: verde = **subsanados** (con MT3)
+  y naranja = **pendientes**.
+- **El número del centro** es el **% de avance global** (`realizados ÷ total`).
+- **Para qué sirve:** es la foto de un vistazo del avance. Si la porción verde crece, el plan avanza.
+- **Cómo leerla:** pasa el mouse por cada porción para ver el conteo exacto y el porcentaje.
+
+#### 🏆 Ranking de sedes (pendientes)
+- **Qué muestra:** barras horizontales con las sedes que tienen **más pendientes**. Puedes elegir
+  mostrar 5, 10, 12, 15, 20 o 25.
+- Cada barra combina **subsanados + pendientes**; la etiqueta es `SBAN · nombre de la oficina`.
+- **Para qué sirve:** **priorizar**. Las barras de arriba son las que más trabajo acumulan.
+- **Truco:** **haz clic en una barra** y todo el panel se filtra por esa sede (aparece un chip arriba).
+  Quítalo con **✖ Quitar filtro** o con 🧹 Limpiar filtros.
+
+#### 📈 Tendencia MT3 (realizados por día)
+- **Qué muestra:** dos series sobre la misma línea de tiempo:
+  - **Área celeste con puntos** = MT3 realizados **cada día** (según `Fecha de mantenimiento 3`).
+  - **Línea punteada verde** = **acumulado** (suma corrida, eje derecho).
+- **Para qué sirve:** ver el **ritmo**. Si el área diaria baja o el acumulado se aplana, la operación
+  se está frenando; si el acumulado sube en línea recta, el ritmo es constante.
+- **Cómo leerla:** eje izquierdo = MT3 del día · eje derecho = acumulado. El subtítulo indica el total
+  y el último día con registros.
+
+#### 🗺️ Mapa de calor (Regional × Estado de la sede)
+- **Qué muestra:** una cuadrícula:
+  - **Filas** = **Regional** (más una fila **SIN REGIONAL**, que agrupa bodegas/stock sin regional asignada).
+  - **Columnas** = **estado de la sede**: `Programada · En proceso · Finalizada · Reprogramada_Finalizada · Sin cronograma`.
+  - **Color y número de cada celda** = **equipos pendientes** de esa combinación. Cuanto más claro/amarillo,
+    más pendientes (el rango de color va de **0** al máximo real).
+- **Al pasar el mouse** por una celda ves además el **Total** de equipos y el **% de avance MT3**.
+- **Para qué sirve:** localizar **dónde** está el atraso, no solo cuánto.
+  - Una mancha fuerte en **Programada** de una regional = mucho trabajo aún por ejecutar.
+  - Una mancha en **Finalizada** = equipos pendientes en sedes que la oficina ya marcó como cerradas:
+    **revisar**, porque hay incoherencia entre el estado oficial y la Data.
+  - Una mancha en **SIN REGIONAL** = stock/bodegas sin regional; no es una sede operativa.
+- **Cómo validarlo:** el subtítulo del gráfico dice cuántos equipos cubre. Ese número debe **coincidir**
+  con el "📦 Total de elementos" de las tarjetas KPI para el mismo filtro.
+
+#### 📊 Novedades por categoría (dentro de 📰 Novedades de las oficinas)
+- **Qué muestra:** cuántas novedades hay por **categoría** (DENUNCIO, RECOLECCIÓN, CAMBIO DE ESTADO A
+  FACTURABLE, OPERACIÓN, ASEGURAMIENTO…).
+- **Para qué sirve:** ver **qué tipo de problema domina** y a quién escalarlo (seguridad, logística, facturación).
+
 
 ### 🏢 Resumen por oficina
 Tabla con una fila por sede: `SBAN · Oficina · Estado · Total · Subsanados · Pendientes · % Avance ·
@@ -160,14 +230,17 @@ Solo lista las oficinas **con UPS en la Data**:
 | Indicador | Qué mide |
 |---|---|
 | 🔋 **Cobertura col AP** | Oficinas con UPS que ya traen algún valor en esa columna |
-| ✅ **UPS finalizadas (col AP)** | Oficinas marcadas `Finalizado` (indicador oficial) |
+| 🧩 **Coinciden AP y MT3** | Oficinas donde la columna AP dice `Finalizado` **y** además todos sus UPS tienen MT3 |
 | 🟨 **En proceso · ⬜ Programadas** | Conteo de los demás estados de la columna AP |
 | ⚠️ **Diferencias AP vs MT3** | Oficinas donde el estado oficial y el control de MT3 no cuadran |
 
+> El conteo **oficial** de UPS finalizadas (tarjeta 🔋 «UPS finalizadas (col AP)») está en las tarjetas de
+> indicadores de oficinas, arriba: **no se repite** dentro de esta pestaña.
+
 La tabla muestra `SBAN · Oficina · UPS en Data · UPS con MT3 · Avance MT3 % · Estado UPS (col AP) ·
 Observación UPS · Alerta`, y el desplegable **❓ Conciliación** explica la diferencia entre el dato oficial
-(141 UPS finalizadas en la columna AP) y el control calculado con la Data (162 oficinas al 100% MT3).
-Puedes **descargar** el panel en CSV o Excel.
+(**229 UPS finalizadas en la columna AP**) y el control calculado con la Data —que puede no coincidir,
+justamente porque vienen de archivos distintos—. Puedes **descargar** el panel en CSV o Excel.
 
 ### 📰 Novedades de las oficinas — en todos los módulos
 Novedades reportadas por las oficinas (hoja **Novedades Equipos** del archivo Campos dashboard):
@@ -268,6 +341,11 @@ Doble clic en **`actualizar_panel.bat`** (trae los últimos cambios del reposito
 | **MT3 / MT** | Mantenimiento preventivo 3 (el consecutivo asignado cuando se realiza) |
 | **Subsanado** | Equipo que ya tiene su mantenimiento hecho |
 | **Pendiente** | Equipo que aún no tiene mantenimiento |
+| **Oficina intervenida** | Oficina donde ya se realizó **al menos 1** MT3 (avance **parcial**) |
+| **Oficina 100% MT3** | Oficina donde **todos** los equipos de ese componente tienen MT3 (avance **completo**) |
+| **Columna N** | Estado **oficial** de la sede en el archivo Campos dashboard |
+| **Columna AP** | Estado **oficial** del avance de las UPS en el archivo Campos dashboard |
+| **Oficial vs. control** | *Oficial* = lo que reporta la oficina (Campos) · *Control* = lo que el panel calcula con la Data. Sirven para detectar diferencias |
 | **Cronograma** | Programación de las visitas/actividades por sede |
 | **Novedad** | Situación particular reportada de un equipo o sede |
 | **Facturable** | Equipo cuyo mantenimiento se factura al Banco (Si) o es gestión COLSOF (No) |

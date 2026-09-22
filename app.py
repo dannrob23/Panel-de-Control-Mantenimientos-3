@@ -2104,29 +2104,6 @@ def grafico_dona(realizados: int, pendientes: int):
     return fig
 
 
-def grafico_gauge(realizados: int, pendientes: int):
-    """Gauge ejecutivo con el % de avance global."""
-    t = tema_actual()
-    total = realizados + pendientes
-    pct = (realizados / total * 100) if total else 0.0
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=round(pct, 1),
-        number=dict(suffix="%", font=dict(size=30, color=t["ink"])),
-        title=dict(text=f"Avance MT3 global<br><span style='font-size:11px;color:{t['muted']}'>"
-                        f"{realizados:,} de {total:,} equipos</span>".replace(",", "."),
-                   font=dict(size=14, color=t["ink"])),
-        gauge=dict(
-            axis=dict(range=[0, 100], visible=False),
-            bar=dict(color=t["verde"], thickness=0.30),
-            bgcolor=t["pista"],
-            borderwidth=0,
-        ),
-    ))
-    fig.update_layout(height=340, margin=dict(l=25, r=25, t=70, b=10), **plotly_base())
-    return fig
-
-
 def grafico_tendencia(datos: pd.DataFrame):
     """Tendencia diaria y acumulada de MT3 (usa Fecha de mantenimiento 3)."""
     t = tema_actual()
@@ -2298,11 +2275,8 @@ def render_vista_ejecutiva(filtrado: pd.DataFrame, df: pd.DataFrame, seleccion: 
     realizados = int(filtrado["_mt"].sum())
     pendientes = int(filtrado["_pendiente"].sum())
 
-    f1a, f1b = st.columns(2)
-    with f1a:
-        st.plotly_chart(grafico_gauge(realizados, pendientes), width="stretch", config=cfg)
-    with f1b:
-        st.plotly_chart(grafico_dona(realizados, pendientes), width="stretch", config=cfg)
+    # Un solo gráfico de avance: la dona (el taquímetro mostraba la misma cifra).
+    st.plotly_chart(grafico_dona(realizados, pendientes), width="stretch", config=cfg)
 
     f2a, f2b = st.columns([1.4, 1])
     with f2a:
@@ -2343,35 +2317,51 @@ def _texto_contraste(escala, frac):
 
 
 def grafico_heatmap(datos: pd.DataFrame):
-    """Heatmap Regional × Estado con pendientes, total y avance."""
+    """Mapa de calor Regional × Estado de la sede (pendientes, total y avance MT3).
+
+    No oculta información:
+      * incluye TODOS los estados presentes, aunque no estén en la lista conocida
+        (p. ej. «Reprogramada_Finalizada»), y
+      * agrupa las filas sin Regional bajo «SIN REGIONAL» en lugar de perderlas
+        (antes `pivot_table` descartaba esas filas por tener índice vacío).
+    La escala de color va de 0 al máximo real, para que el tono sea comparable.
+    """
     t = tema_actual()
     if "Regional" not in datos.columns or "_est_crono" not in datos.columns:
         return None
     d = datos.copy()
-    d["_est"] = d["_est_crono"].astype(str).str.replace(r"^[^A-Za-zÁÉÍÓÚáéíóúñ]+", "",
-                                                        regex=True).str.strip()
-    orden = ["Programada", "En proceso", "Finalizada", "Reprogramada", "Sin cronograma"]
-    cols = [c for c in orden if c in set(d["_est"])]
+    d["_est"] = (d["_est_crono"].astype(str)
+                 .str.replace(r"^[^A-Za-zÁÉÍÓÚáéíóúñ]+", "", regex=True).str.strip())
+    d.loc[d["_est"].isin(["", "nan", "None"]), "_est"] = "Sin cronograma"
+    reg = d["Regional"].astype(str).str.strip()
+    d["_reg"] = reg.where(~reg.isin(["", "nan", "None"]), "SIN REGIONAL")
+    d["_mt_int"] = d["_mt"].astype(int)
+
+    orden = ["Programada", "En proceso", "Finalizada", "Reprogramada",
+             "Reprogramada_Finalizada", "Sin cronograma"]
+    presentes = set(d["_est"])
+    cols = ([c for c in orden if c in presentes]
+            + [c for c in sorted(presentes) if c not in orden])
     if not cols:
         return None
-    pend = d.pivot_table(index="Regional", columns="_est", values="_pendiente",
-                         aggfunc="sum", fill_value=0)
-    total = d.pivot_table(index="Regional", columns="_est", values="_pendiente",
-                          aggfunc="size", fill_value=0)
-    mt = d.assign(_m=d["_mt"].astype(int)).pivot_table(index="Regional", columns="_est",
-                                                      values="_m", aggfunc="sum", fill_value=0)
-    pend = pend.reindex(columns=cols, fill_value=0)
-    total = total.reindex(columns=cols, fill_value=0)
-    mt = mt.reindex(columns=cols, fill_value=0)
+
+    def _pivote(valores, agg):
+        return (d.pivot_table(index="_reg", columns="_est", values=valores,
+                              aggfunc=agg, fill_value=0)
+                .reindex(columns=cols, fill_value=0))
+
+    pend = _pivote("_pendiente", "sum")
+    total = _pivote("_pendiente", "size")
+    mt = _pivote("_mt_int", "sum")
     avance = (mt / total * 100).where(total > 0, 0).round(0)
 
     custom = [[[int(total.iloc[i, j]), f"{avance.iloc[i, j]:.0f}%"]
                for j in range(len(cols))] for i in range(len(pend.index))]
     zmax = float(pend.values.max()) if pend.values.size else 1.0
-    zmin = float(pend.values.min()) if pend.values.size else 0.0
+    zmax = zmax if zmax > 0 else 1.0
     fig = go.Figure(go.Heatmap(
         z=pend.values, x=cols, y=list(pend.index),
-        zmin=zmin, zmax=zmax,                     # escala anclada al rango real
+        zmin=0, zmax=zmax,                       # escala desde 0 hasta el máximo real
         customdata=custom, colorscale=t["heat"], xgap=3, ygap=3,
         colorbar=dict(title=dict(text="Pendientes", font=dict(color=t["ink"])),
                       tickfont=dict(color=t["muted"])),
@@ -2379,20 +2369,24 @@ def grafico_heatmap(datos: pd.DataFrame):
                       "Total: %{customdata[0]}<br>Avance MT3: %{customdata[1]}<extra></extra>",
     ))
     # Etiquetas con color calculado (contraste garantizado sobre cualquier tono del calor)
-    for i, reg in enumerate(pend.index):
+    for i, reg_n in enumerate(pend.index):
         for j, est in enumerate(cols):
             v = int(pend.values[i][j])
             if v <= 0:
                 continue
-            frac = (v - zmin) / (zmax - zmin) if zmax > zmin else 1.0
-            fig.add_annotation(x=est, y=reg, text=f"{v:,}".replace(",", "."),
+            fig.add_annotation(x=est, y=reg_n, text=f"{v:,}".replace(",", "."),
                                showarrow=False, xref="x", yref="y",
-                               font=dict(size=11, color=_texto_contraste(t["heat"], frac)))
+                               font=dict(size=11, color=_texto_contraste(t["heat"], v / zmax)))
+    _total_equipos = int(total.values.sum())
     fig.update_layout(
-        title=dict(text="<b>Mapa de calor: pendientes por Regional y Estado</b>",
+        title=dict(text="<b>Mapa de calor: pendientes por Regional y Estado de la sede</b>"
+                        "<br><span style='font-size:11px'>«SIN REGIONAL» agrupa bodegas/stock "
+                        "sin regional asignada. "
+                        f"Equipos cubiertos: {_total_equipos:,}".replace(",", ".")
+                        + "</span>",
                    font=dict(size=15, color=t["ink"]), x=0.02),
         height=max(320, 42 * len(pend.index) + 120),
-        margin=dict(l=10, r=10, t=55, b=10),
+        margin=dict(l=10, r=10, t=70, b=10),
         xaxis=dict(title="", color=t["muted"]),
         yaxis=dict(title="", autorange="reversed", color=t["muted"]),
         **plotly_base(),
@@ -3169,15 +3163,10 @@ def main():
     tab_nov_ofi, tab_nov = tabs[i], tabs[i + 1]
 
     with tab_graf:
-        fila1a, fila1b = st.columns([1, 1])
-        with fila1a:
-            st.plotly_chart(
-                grafico_dona(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
-                width="stretch", config=cfg_chart)
-        with fila1b:
-            st.plotly_chart(
-                grafico_gauge(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
-                width="stretch", config=cfg_chart)
+        # Un solo gráfico de avance: la dona (el taquímetro repetía la misma cifra).
+        st.plotly_chart(
+            grafico_dona(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
+            width="stretch", config=cfg_chart)
 
         fila2a, fila2b = st.columns([1, 1.3])
         with fila2a:

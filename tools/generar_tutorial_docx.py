@@ -124,7 +124,7 @@ def portada(doc: Document):
     doc.add_paragraph()
     # Indice
     h = doc.add_heading("Contenido", level=1)
-    _campo(doc.add_paragraph(), 'TOC \\o "1-3" \\h \\z \\u')
+    _campo(doc.add_paragraph(), 'TOC \\o "1-4" \\h \\z \\u')
     doc.add_page_break()
 
 
@@ -169,9 +169,9 @@ def convertir(md_texto: str, doc: Document):
             par.paragraph_format.left_indent = Cm(0.5)
             r = par.add_run("\n".join(codigo))
             r.font.name = "Consolas"; r.font.size = Pt(8.5)
-        elif re.match(r"^#{1,3} ", ln):
+        elif re.match(r"^#{1,4} ", ln):
             nivel = len(ln) - len(ln.lstrip("#"))
-            doc.add_heading(ln[nivel + 1:].strip(), level=min(nivel, 3))
+            doc.add_heading(ln[nivel + 1:].strip(), level=min(nivel, 4))
         elif re.match(r"^\s*[-*] ", ln):
             par = doc.add_paragraph(style="List Bullet")
             _runs_inline(par, re.sub(r"^\s*[-*] ", "", ln))

@@ -858,6 +858,28 @@ def _col(df, *nombres):
 
 _PRIO_UPS = ["Finalizado", "Finalizada", "En proceso", "En ejecución", "Programado",
              "Programada", "No aplica", "Pendiente"]
+# Prioridad del ESTADO DE LA SEDE (col N). Regla del negocio: una sede con varias
+# filas (Regional / Jefatura / Oficina) se resume por la de MAYOR prioridad.
+_PRIO_SEDE = ["Finalizada", "Reprogramada_Finalizada", "En proceso", "Programada"]
+
+
+def _mejor_por_sban(valores, prioridad):
+    """Resume varias filas por SBAN quedándose con el estado de MAYOR prioridad.
+
+    `prioridad` es la lista ordenada de mayor a menor; lo que no esté en ella queda
+    al final. A diferencia de «gana la última fila», esto no depende del orden del
+    archivo: la sede conserva siempre el estado más avanzado.
+    """
+    idx = {v: i for i, v in enumerate(prioridad)}
+    mejor: dict = {}
+    for sban, valor in valores:
+        v = str(valor).strip()
+        if not v or v.lower() in ("nan", "none"):
+            continue
+        actual = mejor.get(sban)
+        if actual is None or idx.get(v, len(prioridad)) < idx.get(actual, len(prioridad)):
+            mejor[sban] = v
+    return mejor
 
 
 def preparar_campos(kpi, nov, df=None):
@@ -894,25 +916,9 @@ def preparar_campos(kpi, nov, df=None):
                            else "Campos dashboard sin columna «ESTADO UPS»")
         k = k[k["_SBAN"].astype(str).str.len() > 0]
 
-        # Un SBAN puede tener varias filas (Regional/Jefatura/sede): se agrupa con
-        # prioridad para no perder sedes marcadas Finalizada en una fila secundaria.
-        _prio = ["Finalizada", "Reprogramada_Finalizada", "En proceso", "Programada"]
-
-        def _prio_estado(serie):
-            vals = {str(x).strip() for x in serie if str(x).strip()}
-            for p in _prio:
-                if p in vals:
-                    return p
-            return sorted(vals)[0] if vals else ""
-
-        def _prio_ups(serie):
-            """Estado UPS de la sede (col AP). Prioriza el avance más adelantado."""
-            vals = {str(x).strip() for x in serie if str(x).strip()}
-            for p in _PRIO_UPS:
-                if p in vals:
-                    return p
-            return sorted(vals)[0] if vals else ""
-
+        # Un SBAN puede tener varias filas (Regional/Jefatura/sede): se resume con la
+        # MISMA regla de prioridad que usan las tarjetas de oficinas (`_mejor_por_sban`),
+        # para que ninguna cifra difiera entre vistas.
         def _ultimo_lleno(serie):
             """Última observación no vacía (evita perder texto en filas secundarias)."""
             for x in reversed(list(serie)):
@@ -920,12 +926,18 @@ def preparar_campos(kpi, nov, df=None):
                     return str(x).strip()
             return ""
 
-        k = (k.groupby("_SBAN", as_index=False)
-              .agg({"Estado sede": _prio_estado,
-                    "Estado UPS": _prio_ups,
-                    "Obs. novedad": _ultimo_lleno,
-                    "Obs. UPS": _ultimo_lleno,
-                    "Fuente UPS": _ultimo_lleno}))
+        mapa_sede = _mejor_por_sban(zip(k["_SBAN"].astype(str), k["Estado sede"]), _PRIO_SEDE)
+        # El estado UPS se NORMALIZA antes de agregar, igual que en `oficinas_campos`:
+        # así ambas rutas alimentan el helper con los mismos valores y no divergen.
+        mapa_ups = _mejor_por_sban(
+            zip(k["_SBAN"].astype(str), k["Estado UPS"].apply(normalizar_estado_ups)),
+            _PRIO_UPS)
+
+        k = k.groupby("_SBAN", as_index=False).agg(
+            {"Obs. novedad": _ultimo_lleno, "Obs. UPS": _ultimo_lleno,
+             "Fuente UPS": _ultimo_lleno})
+        k["Estado sede"] = k["_SBAN"].map(mapa_sede).fillna("")
+        k["Estado UPS"] = k["_SBAN"].map(mapa_ups).fillna("")
 
     n = pd.DataFrame()
     if nov is not None and not nov.empty:
@@ -1195,7 +1207,6 @@ def render_avance_ups(k, df, seleccion=None):
     proc = int(t["Estado UPS normalizado"].eq("En proceso").sum())
     prog = int(t["Estado UPS normalizado"].eq("Programada").sum())
     sin_rep = total - reportadas
-    pct = (fin / total * 100) if total else 0.0
 
     # --- Conciliación con el control de MT3 (fuente distinta) ---
     con_ups = t["UPS en Data"] > 0
@@ -1212,9 +1223,14 @@ def render_avance_ups(k, df, seleccion=None):
               delta=f"{sin_rep} sin dato", delta_color="off", border=True,
               help="Sedes **con UPS en la Data** que ya traen algún valor en la columna AP "
                    "«ESTADO UPS». Las demás están en blanco: la oficina todavía no marca su avance.")
-    c2.metric("✅ UPS finalizadas (col AP)", f"{fin}",
-              delta=f"{pct:.0f}% de las sedes con UPS", border=True,
-              help="Estado OFICIAL del avance UPS: filas de la columna AP con 'Finalizado'.")
+    # NOTA: los conteos «oficiales» (col AP) y «100% MT3» ya están en las tarjetas de
+    # indicadores de oficinas; aquí NO se repiten. Esta tarjeta mide la CONCILIACIÓN
+    # (cuántas sedes coinciden), que es el propósito de esta pestaña.
+    c2.metric("🧩 Coinciden AP y MT3", f"{ambos}",
+              delta=f"de {n_con_ups} sedes con UPS", delta_color="off", border=True,
+              help="Sedes donde la columna AP dice `Finalizado` Y todos sus UPS de la Data "
+                   "tienen consecutivo MT3. Las dos cifras por separado están en las tarjetas "
+                   "«🔋 UPS finalizadas (col AP)» y «UPS: oficinas 100% MT3» de los indicadores.")
     c3.metric("🟨 En proceso · ⬜ Programadas", f"{proc} · {prog}",
               help="Conteo de la columna AP en los demás estados. " + (f"Sin dato: {sin_rep}."
                    if sin_rep else "Todas las sedes tienen dato."), border=True)
@@ -1814,47 +1830,37 @@ def oficinas_campos(kpi_campos, seleccion=None, click_sban=None):
         kk = kk[kk["_SBAN"].eq(click_sban)]
     universo = set(kk["_SBAN"].astype(str))
 
-    def _primero(valores):
-        """Estado por SBAN con prioridad (una sede puede tener varias filas)."""
-        mejor = {}
-        for sban, valor in valores:
-            v = str(valor).strip()
-            if not v:
-                continue
-            actual = mejor.get(sban)
-            if actual is None:
-                mejor[sban] = v
-                continue
-            for p in _PRIO_UPS:
-                if p == v and p != actual:
-                    mejor[sban] = v
-                    break
-        return mejor
-
     finalizadas_n = 0
     c_est = _col(kk, "Estado de la sede")
     if c_est is not None:
-        estados = _primero(zip(kk["_SBAN"].astype(str),
-                               kk[c_est].fillna("").astype(str)))
+        estados = _mejor_por_sban(zip(kk["_SBAN"].astype(str),
+                                      kk[c_est].fillna("").astype(str)), _PRIO_SEDE)
         finalizadas_n = sum(1 for v in estados.values() if v == "Finalizada")
     reportadas_ap = finalizadas_ap = 0
     c_ap = _col(kk, "ESTADO UPS")
     if c_ap is not None:
-        ups = _primero(zip(kk["_SBAN"].astype(str),
-                           kk[c_ap].apply(normalizar_estado_ups)))
+        ups = _mejor_por_sban(zip(kk["_SBAN"].astype(str),
+                                  kk[c_ap].apply(normalizar_estado_ups)), _PRIO_UPS)
         reportadas_ap = len(ups)
         finalizadas_ap = sum(1 for v in ups.values() if v == "Finalizada")
     return universo, finalizadas_n, reportadas_ap, finalizadas_ap
 
 
-def tarjetas_destacadas(datos: pd.DataFrame, kpi_campos=None, seleccion=None,
-                        solo_pendientes: bool = False):
-    """KPIs destacados: oficinas intervenidas (Campos col N) y avance MT3 con barra.
+def tarjetas_destacadas(datos: pd.DataFrame):
+    """KPIs destacados: oficinas intervenidas (control con la Data) y avance MT3.
 
-    El conteo de equipos intervenidos NO se repite aqui: ya esta en las tarjetas KPI
-    (Realizados / Pendientes), para no mostrar la misma cifra dos veces.
-    El conteo de oficinas sale de `oficinas_campos()`, la misma fuente que usan las
-    tarjetas de indicadores: asi las dos cifras coinciden siempre.
+    «Oficinas intervenidas» = oficinas con al menos 1 MT3 en el módulo activo: es un
+    CONTROL calculado con la Data, distinto del estado OFICIAL de la sede (col N de
+    Campos), que se muestra en «🏁 Oficinas finalizadas (Campos N)». Así las dos cifras
+    no comparten etiqueta ni se confunden.
+
+    `datos` debe llegar SIN el filtro de tabla «solo pendientes»: ese filtro deja solo
+    filas sin MT3, así que aplicarlo aquí haría caer el numerador a 0. El numerador y el
+    denominador se calculan sobre el MISMO conjunto (`datos`), para que la tarjeta
+    siempre sea coherente consigo misma.
+
+    Los conteos de EQUIPOS (Total / Realizados / Pendientes) no se repiten aquí: viven
+    en `render_kpis()`. Esta cabecera solo muestra el % de avance con su barra.
     """
     t = tema_actual()
     if datos is None or len(datos) == 0:
@@ -1863,18 +1869,15 @@ def tarjetas_destacadas(datos: pd.DataFrame, kpi_campos=None, seleccion=None,
     def fmt(n) -> str:
         return f"{int(n):,}".replace(",", ".")
 
-    if solo_pendientes and "_pendiente" in datos.columns:
-        datos = datos[datos["_pendiente"]]
-
-    universo, n_ofi_int, _rep_ap, _fin_ap = oficinas_campos(kpi_campos, seleccion)
-    n_ofi = len(universo) or int(datos["_SBAN"].nunique())
+    # Numerador y denominador sobre el mismo conjunto: oficinas del módulo activo que
+    # cumplen los filtros de sidebar (Oficina · Facturación · clic del ranking).
+    n_ofi = int(datos["_SBAN"].nunique())
     n_reg = int(datos["Regional"].nunique()) if "Regional" in datos.columns else 0
-    if not universo:          # respaldo si Campos no está disponible
-        try:
-            g_of = datos.groupby("_SBAN")["_mt"].agg(["size", "sum"])
-            n_ofi_int = int((g_of["sum"] > 0).sum())
-        except Exception:  # noqa: BLE001
-            n_ofi_int = n_ofi
+    try:
+        g_of = datos.groupby("_SBAN")["_mt"].agg(["size", "sum"])
+        n_ofi_int = int((g_of["sum"] > 0).sum())
+    except Exception:  # noqa: BLE001
+        n_ofi_int = 0
     total = int(len(datos))
     realizados = int(datos["_mt"].sum())
     avance = (realizados / total * 100) if total else 0.0
@@ -1893,7 +1896,7 @@ def tarjetas_destacadas(datos: pd.DataFrame, kpi_campos=None, seleccion=None,
         st.markdown(
             f'<div class="kd"><div class="kd-lbl">🏢 Oficinas intervenidas</div>'
             f'<div class="kd-num">{fmt(n_ofi_int)}</div>'
-            f'<div class="kd-sub">de {fmt(n_ofi)} oficinas del archivo'
+            f'<div class="kd-sub">de {fmt(n_ofi)} oficinas del módulo'
             + (f' · {n_reg} regionales' if n_reg else '') + '</div></div>',
             unsafe_allow_html=True)
     with c2:
@@ -1910,23 +1913,23 @@ def render_kpis(datos: pd.DataFrame):
     """Tarjetas KPI del filtro activo (módulo + sidebar + clic del ranking).
 
     Es la ÚNICA fuente de los conteos de equipos: el resto de vistas no los repite.
-    El % de avance va como delta de la tarjeta de MT (antes se repetía en una barra).
+    El % de avance vive en la tarjeta destacada «📈 Avance MT3» (arriba), así que
+    aquí NO se repite como delta.
     """
     total = len(datos)
     realizados = int(datos["_mt"].sum())
     pendientes = int(datos["_pendiente"].sum())
     fact_si = int((datos["Facturable"] == "Si").sum())
     fact_no = int((datos["Facturable"] == "No").sum())
-    avance = (realizados / total * 100) if total else 0.0
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("📦 Total de elementos", f"{total:,}".replace(",", "."),
               help="Equipos del módulo activo que cumplen los filtros (Oficina · Facturación · "
                    "solo pendientes · clic del ranking).", border=True)
     c2.metric("✅ Mantenimientos realizados (MT)", f"{realizados:,}".replace(",", "."),
-              delta=f"{avance:.1f}% de avance".replace(".", ","),
-              help="Filas cuyo 'Consecutivo mantenimiento 3' empieza por MT. El delta es el avance "
-                   "del filtro actual (realizados ÷ total).", border=True)
+              help="Filas cuyo 'Consecutivo mantenimiento 3' empieza por MT. El % de avance del "
+                   "filtro está en la tarjeta destacada «📈 Avance MT3» (no se repite aquí).",
+              border=True)
     c3.metric("⚠️ Mantenimientos pendientes", f"{pendientes:,}".replace(",", "."),
               delta=f"{pendientes/total*100:.1f}%" if total else "0%",
               delta_color="inverse", help="Total de elementos − Realizados", border=True)
@@ -2028,8 +2031,10 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
                 "🏁 Oficinas finalizadas (Campos N)", f"{fin_n} / {tot}",
                 delta=f"{pct:.0f}% del archivo",
                 help="Estado OFICIAL de la sede: columna N ('Estado de la sede') de Campos "
-                     "dashboard, contada por SBAN único (la misma cifra que la tarjeta "
-                     "«Oficinas intervenidas»). 'Reprogramada_Finalizada' se contabiliza aparte.",
+                     "dashboard, contada por SBAN único (una sede con varias filas se resume por "
+                     "la de mayor prioridad: Finalizada > Reprogramada_Finalizada > En proceso > "
+                     "Programada). No es lo mismo que «Oficinas intervenidas» (control con la Data). "
+                     "'Reprogramada_Finalizada' se contabiliza aparte.",
                 border=True,
             )
         else:
@@ -2941,6 +2946,11 @@ def main():
 
     estados_crono = cargar_estados_crono()
 
+    # Componente (C1 / C2 láser / UPS) ANTES de preparar Campos: así las novedades se
+    # amarran por Serial al componente REAL del equipo y no solo por el texto de la
+    # observación (antes se calculaba después y el mapa por Serial quedaba vacío).
+    df["_componente"] = clasificar_componente(df)
+
     # --- Campos dashboard: Estado de la sede, Categoría Novedad (Y) y novedades ---
     kpi_campos, nov_campos = cargar_campos()
     kpi_norm, nov_norm = preparar_campos(kpi_campos, nov_campos, df)
@@ -2949,20 +2959,13 @@ def main():
     fecha_corte = (nov_norm["_FECHA"].max() if (nov_norm is not None and not nov_norm.empty)
                    else None)
 
-    # Estado por SBAN: prioriza la fuente diaria (Dashboard_KPI, col N).
-    # Un SBAN puede tener varias filas (Regional/Jefatura/sede); si CUALQUIERA dice
-    # 'Finalizada', la sede se considera finalizada (evita perder jefaturas 01600/06900).
-    estados_por_sban = {}
-    if kpi_norm is not None and not kpi_norm.empty and "Estado sede" in kpi_norm.columns:
-        for _, fila_k in kpi_norm.iterrows():
-            est = str(fila_k.get("Estado sede", "") or "").strip()
-            if est:
-                estados_por_sban.setdefault(str(fila_k["_SBAN"]), set()).add(est)
-    prioridad = ["Finalizada", "Reprogramada_Finalizada", "En proceso", "Programada"]
+    # Estado por SBAN desde Campos dashboard (col N). Se usa la MISMA regla de prioridad
+    # que el resto del panel (`_mejor_por_sban`), para que no exista una segunda
+    # implementación del criterio que pueda desincronizarse.
     estados_sede = {}
-    for sban_k, ests in estados_por_sban.items():
-        elegido = next((p for p in prioridad if p in ests), None)
-        estados_sede[sban_k] = elegido or sorted(ests)[0]
+    if kpi_norm is not None and not kpi_norm.empty and "Estado sede" in kpi_norm.columns:
+        estados_sede = _mejor_por_sban(
+            zip(kpi_norm["_SBAN"].astype(str), kpi_norm["Estado sede"]), _PRIO_SEDE)
 
     def _estado_sban(v):
         if pd.isna(v):
@@ -2971,8 +2974,6 @@ def main():
         return estados_sede.get(sban) or estados_crono.get(int(v))
 
     df["_est_crono"] = df["SBAN"].map(_estado_sban).fillna("Sin cronograma")
-
-    df["_componente"] = clasificar_componente(df)
 
     # Regla de negocio opcional: impresoras láser (C2) tratadas como facturables
     if IMPRESORAS_FACTURABLES:
@@ -3106,8 +3107,10 @@ def main():
                          key="vista_v2")
     vista = vista or "Operativa"
     if vista == "Ejecutiva":
-        # Mismo bloque de KPIs principales que la vista operativa (lenguaje visual unificado)
-        tarjetas_destacadas(filtrado, kpi_campos, seleccion, solo_pendientes)
+        # Mismo bloque de KPIs principales que la vista operativa (lenguaje visual unificado).
+        # Se pasa `base_oficina` (sin el filtro de tabla "solo pendientes") para que el
+        # numerador de "Oficinas intervenidas" no quede en 0.
+        tarjetas_destacadas(base_oficina)
         render_vista_ejecutiva(filtrado, df, seleccion, f_attr,
                                st.session_state.get("click_sban"))
         st.markdown("---")
@@ -3129,13 +3132,13 @@ def main():
             for msg in avisos:
                 st.warning(msg)
 
-    # --- KPIs PRINCIPALES (de primera): oficinas, % de avance y equipos impactados ---
-    tarjetas_destacadas(filtrado, kpi_campos, seleccion, solo_pendientes)
+    # --- KPIs PRINCIPALES (de primera): oficinas intervenidas y avance MT3 ---
+    # `base_oficina` (sin "solo pendientes"): ese filtro es de tabla y dejaría el
+    # numerador en 0; los KPIs de cabecera describen el módulo, no la tabla.
+    tarjetas_destacadas(base_oficina)
 
-    # --- KPIs de detalle ---
+    # --- KPIs de detalle (cada bloque se dibuja UNA sola vez) ---
     render_kpis(filtrado)
-    render_kpis_oficinas(df, seleccion, f_attr, st.session_state.get("click_sban"), kpi_campos)
-    avance_filtro = float(filtrado["_mt"].mean() * 100) if len(filtrado) else 0.0
     render_kpis_oficinas(df, seleccion, f_attr, st.session_state.get("click_sban"),
                          kpi_campos, cod_mod=cod_mod, solo_pendientes=solo_pendientes)
 

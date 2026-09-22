@@ -18,6 +18,7 @@ uploads/
 data/
 Ingesta de datos diaria/
 deploy_panel/data/
+deploy_panel/
 
 # IDE
 .vscode/

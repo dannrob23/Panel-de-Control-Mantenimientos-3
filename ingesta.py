@@ -35,8 +35,16 @@ from pathlib import Path
 
 import pandas as pd
 
+# La consola de Windows usa cp1252 y revienta con flechas/emojis en los print().
+# Se fuerza UTF-8 (con reemplazo) para que la ingesta nunca se caiga por un carácter.
+for _flujo in (sys.stdout, sys.stderr):
+    try:
+        _flujo.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        pass
+
 # ----------------------------------------------------------------------------
-# Zona horaria oficial: América/Bogotá (UTC-5) — Bogotá, Lima, Quito
+# Zona horaria oficial: América/Bogotá (UTC-5) - Bogotá, Lima, Quito
 # ----------------------------------------------------------------------------
 try:
     import zoneinfo
@@ -430,7 +438,7 @@ def validar_con_el_panel(tipo: str, hojas: dict) -> list:
                           f"{df['_componente'].value_counts().to_dict()}".replace(",", "."))
             dup = int(df["Serial"].duplicated().sum())
             if dup:
-                avisos.append(f"{dup} Serial(es) duplicado(s) — 1 fila debe ser 1 equipo")
+                avisos.append(f"{dup} Serial(es) duplicado(s) - 1 fila debe ser 1 equipo")
             sin_sban = int(df["_SBAN"].astype(str).str.len().eq(0).sum())
             if sin_sban:
                 avisos.append(f"{sin_sban} fila(s) sin SBAN (no se pueden ubicar por oficina)")
@@ -455,7 +463,7 @@ def validar_con_el_panel(tipo: str, hojas: dict) -> list:
                 estado = kpi[app._col(kpi, "ESTADO UPS")].dropna()
                 if len(estado):
                     avisos.append(f"ESTADO UPS (col AP): {len(estado)} sede(s) reportadas "
-                                  f"→ {estado.value_counts().to_dict()}")
+                                  f"-> {estado.value_counts().to_dict()}")
         nov = hojas.get("Novedades Equipos")
         if nov is not None:
             avisos.append(f"{len(nov.dropna(how='all'))} novedad(es) de oficina con datos")
@@ -657,18 +665,18 @@ def publicar_en_github(mensaje: str) -> bool:
               "commit", "-m", mensaje])
     else:
         print("    (no hay cambios nuevos que commitear)")
-    print("  Subiendo a GitHub…")
+    print("  Subiendo a GitHub...")
     if _git(["push", "origin", "main"]) == 0:
-        print("  ✅ Push realizado. Streamlit Cloud se actualiza en 1-2 minutos.")
+        print("  [OK] Push realizado. Streamlit Cloud se actualiza en 1-2 minutos.")
         return True
     # Plan B: usar la credencial guardada directamente (util cuando el helper de git
     # no puede ejecutarse, p. ej. en entornos sin consola interactiva).
-    print("  Reintentando con la credencial guardada…")
+    print("  Reintentando con la credencial guardada...")
     usuario, token = _credencial_github()
     if token and _push(["push", "origin", "main"], usuario, token) == 0:
-        print("  ✅ Push realizado. Streamlit Cloud se actualiza en 1-2 minutos.")
+        print("  [OK] Push realizado. Streamlit Cloud se actualiza en 1-2 minutos.")
         return True
-    print("  ❌ No se pudo subir a GitHub.")
+    print("  [ERROR] No se pudo subir a GitHub.")
     print("     Abre CMD o Git Bash y ejecuta una vez: git -C deploy_panel push origin main")
     print("     Los commits ya quedaron hechos; solo falta subirlos.")
     return False
@@ -711,12 +719,12 @@ def main() -> int:
         return 1
 
     if args.analisis:
-        print("\n[ANALISIS] Revisando columnas (no se escribe nada)…")
+        print("\n[ANALISIS] Revisando columnas (no se escribe nada)...")
         analizar(ORIGEN, archivos)
         return 0
 
     # --- Leer y preparar cada archivo ---
-    print("\n[1/4] Leyendo y ajustando columnas…")
+    print("\n[1/4] Leyendo y ajustando columnas...")
     preparados, detalle = {}, {}
     for tipo, path in archivos.items():
         hojas = leer_y_preparar(path, tipo)
@@ -727,7 +735,7 @@ def main() -> int:
         detalle[tipo] = {"archivo": path.name}
 
     # --- Validacion con las reglas del panel ---
-    print("\n[2/4] Validando contra las reglas del panel…")
+    print("\n[2/4] Validando contra las reglas del panel...")
     problemas = []
     for tipo, hojas in preparados.items():
         faltan = [c for c in (COLUMNAS_OBLIGATORIAS.get(tipo) or [])
@@ -743,7 +751,7 @@ def main() -> int:
         return 2
 
     # --- Escribir los datos ---
-    print("\n[3/4] Escribiendo datos…")
+    print("\n[3/4] Escribiendo datos...")
     destinos = [DATA_LOCAL] + ([] if args.solo_local else [DATA_DEPLOY])
     for carpeta in destinos:
         print(f"  En {carpeta.relative_to(BASE)}/")
@@ -752,7 +760,7 @@ def main() -> int:
         escribir_metadatos(carpeta, detalle)
 
     if not args.solo_local:
-        print("\n  Sincronizando app.py y documentacion con deploy_panel/…")
+        print("\n  Sincronizando app.py y documentacion con deploy_panel/...")
         sincronizar_app()
 
     # --- Publicar ---

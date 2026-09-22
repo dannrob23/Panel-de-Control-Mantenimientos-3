@@ -9,6 +9,13 @@ import shutil
 import sys
 from pathlib import Path
 
+# La consola de Windows usa cp1252: se fuerza UTF-8 para no caer por un carácter.
+for _flujo in (sys.stdout, sys.stderr):
+    try:
+        _flujo.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        pass
+
 BASE = Path(__file__).resolve().parent
 ORIGEN = BASE.parent
 
@@ -39,7 +46,7 @@ def main() -> int:
             shutil.copy2(destino, respaldo)
         destino.write_text(texto, encoding="utf-8", newline="\n")
         cambios += 1
-        print(f"↑ {origen_nombre} -> deploy_panel/{destino_nombre}"
+        print(f"[OK] {origen_nombre} -> deploy_panel/{destino_nombre}"
               + (f" (respaldo: {respaldo.name})" if respaldo else ""))
     print(f"Sincronización terminada: {cambios} archivo(s) actualizado(s).")
     return 0

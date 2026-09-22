@@ -236,19 +236,26 @@ def aplicar_css():
     st.markdown(css, unsafe_allow_html=True)
 
 
+def _guardar_tema(nuevo: str):
+    """Callback: fija el tema antes de que se dibujen los botones.
+
+    Se usa con `on_click` porque escribir en `st.session_state` DESPUÉS de crear el
+    widget lanza StreamlitWidgetAlreadyInstantiatedError.
+    """
+    st.session_state["tema"] = nuevo
+
+
 def barra_tema():
     """Toggle de vista (oscura/clara) — píldoras arriba a la derecha."""
     _vacio, c_osc, c_cla = st.columns([6.6, 1.5, 1.5], vertical_alignment="center")
     with c_osc:
-        if st.button("🌙 Oscuro", key="btn_tema_osc", use_container_width=True,
-                     type="primary" if es_oscuro() else "secondary"):
-            st.session_state["tema"] = "oscuro"
-            st.rerun()
+        st.button("🌙 Oscuro", key="btn_tema_osc", width="stretch",
+                  type="primary" if es_oscuro() else "secondary",
+                  on_click=_guardar_tema, args=("oscuro",))
     with c_cla:
-        if st.button("☀️ Claro", key="btn_tema_cla", use_container_width=True,
-                     type="secondary" if es_oscuro() else "primary"):
-            st.session_state["tema"] = "claro"
-            st.rerun()
+        st.button("☀️ Claro", key="btn_tema_cla", width="stretch",
+                  type="secondary" if es_oscuro() else "primary",
+                  on_click=_guardar_tema, args=("claro",))
 
 
 def plotly_base() -> dict:
@@ -332,6 +339,23 @@ def encabezado_hero(modulo: str, scope: str, atrib: str, n_equipos: int,
     )
 
 
+def _reset_filtros_por_modulo():
+    """on_change del selector de módulo: reinicia los filtros que lo dejarían vacío.
+
+    Se ejecuta como callback (antes del rerun), así que puede limpiar claves de widgets
+    sin riesgo de StreamlitWidgetAlreadyInstantiatedError.
+    """
+    st.session_state.pop("seg_fact", None)   # el selector de facturación se reinicia
+    st.session_state.pop("click_sban", None)
+    for clave, valor in VALORES_FILTRO.items():
+        if clave in ("seg_fact", "click_sban"):
+            continue
+        if valor is None:
+            st.session_state.pop(clave, None)
+        else:
+            st.session_state[clave] = valor
+
+
 def f_attr_seleccionado() -> str:
     """Traduce la selección del selector VISIBLE de facturación a 'T' / 'Si' / 'No'."""
     sel = st.session_state.get("seg_fact") or ""
@@ -379,6 +403,58 @@ def barra_facturacion(df_mod: pd.DataFrame, mostrar_conteos: bool = True):
                    f"🏢 No facturables {fmt(n_no)}")
 
 
+VALORES_FILTRO = {
+    # valor por defecto de cada filtro (clave de session_state)
+    "f_oficinas": [],
+    "f_solo_pend": False,
+    "f_atrib": "Todos",
+    "click_sban": None,
+    "seg_fact": None,
+    "res_estado": None,
+    "res_catnov": None,
+    "res_min_av": 0,
+    "res_solo_pend": False,
+    "res_solo_nov": False,
+}
+
+
+def _quitar_filtro(clave: str):
+    """Callback: devuelve un filtro a su valor por defecto y recarga.
+
+    Siempre por callback (`on_click`) para no tocar `st.session_state` después de
+    crear los widgets (causa de StreamlitWidgetAlreadyInstantiatedError).
+    """
+    valor = VALORES_FILTRO.get(clave)
+    if valor is None:
+        st.session_state.pop(clave, None)
+    else:
+        st.session_state[clave] = valor
+    # La atribución se maneja con el selector visible 'seg_fact'; si se quita el chip,
+    # hay que limpiar también ese selector o seguiría filtrando al usuario.
+    if clave == "f_atrib":
+        st.session_state.pop("seg_fact", None)
+
+
+def _limpiar_todos_los_filtros():
+    """Callback del botón «Limpiar todos los filtros»."""
+    for clave, valor in VALORES_FILTRO.items():
+        if valor is None:
+            st.session_state.pop(clave, None)
+        else:
+            st.session_state[clave] = valor
+
+
+def _limpiar_filtros_resumen():
+    """Callback del botón «Restablecer filtros del resumen»."""
+    for clave in ("res_estado", "res_catnov", "res_min_av",
+                  "res_solo_pend", "res_solo_nov"):
+        valor = VALORES_FILTRO.get(clave)
+        if valor is None:
+            st.session_state.pop(clave, None)
+        else:
+            st.session_state[clave] = valor
+
+
 def barra_filtros_activos(seleccion, solo_pendientes, f_attr, click_sban):
     """Chips de filtros activos, cada uno con botón para quitarlo de un toque."""
     activos = []
@@ -401,16 +477,8 @@ def barra_filtros_activos(seleccion, solo_pendientes, f_attr, click_sban):
         st.caption("Filtros activos:")
     for col, (etiqueta, clave) in zip(cols[1:], activos):
         with col:
-            if st.button("✖ " + etiqueta, key=f"quitar_{clave}", use_container_width=True):
-                if clave == "f_oficinas":
-                    st.session_state["f_oficinas"] = []
-                elif clave == "f_solo_pend":
-                    st.session_state["f_solo_pend"] = False
-                elif clave == "f_atrib":
-                    st.session_state["f_atrib"] = "Todos"
-                else:
-                    st.session_state.pop("click_sban", None)
-                st.rerun()
+            st.button("✖ " + etiqueta, key=f"quitar_{clave}", width="stretch",
+                      on_click=_quitar_filtro, args=(clave,))
 
 
 # ----------------------------------------------------------------------------
@@ -1710,10 +1778,10 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
         st.markdown("## 🛠️ Filtros")
         base_mod = df[df["_componente"].eq(cod_mod)] if "_componente" in df.columns else df
         opciones = sorted(base_mod["_ofi_key"].dropna().unique().tolist())
-        if "f_oficinas" not in st.session_state:
-            st.session_state["f_oficinas"] = []
+        # Limpieza (no asignación nueva) antes de crear el widget: si una oficina ya no
+        # existe en el módulo, se quita de la selección.
         st.session_state["f_oficinas"] = [
-            o for o in st.session_state["f_oficinas"] if o in opciones]
+            o for o in st.session_state.get("f_oficinas", []) if o in opciones]
 
         seleccion = st.multiselect(
             "Oficina (SBAN - Nombre)",
@@ -1725,8 +1793,6 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
         if not opciones:
             st.warning("Este módulo no tiene oficinas con datos.")
 
-        if "f_solo_pend" not in st.session_state:
-            st.session_state["f_solo_pend"] = False
         solo_pendientes = st.checkbox(
             "Mostrar solo pendientes ⚠️",
             key="f_solo_pend",
@@ -1735,24 +1801,12 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
 
         # El filtro de facturación vive ahora en la BARRA VISIBLE del área principal
         # (arriba, siempre a la vista). Aquí solo se sincroniza su valor.
-        if "f_atrib" not in st.session_state:
-            st.session_state["f_atrib"] = "Todos"
         f_attr = f_attr_seleccionado()
         st.caption("💡 El filtro de **Facturación** está arriba, en la barra visible.")
 
         st.divider()
-        if st.button("🧹 Limpiar todos los filtros", width="stretch", key="limpiar_filtros"):
-            st.session_state["f_oficinas"] = []
-            st.session_state["f_solo_pend"] = False
-            st.session_state["f_atrib"] = "Todos"
-            st.session_state.pop("seg_fact", None)
-            st.session_state.pop("click_sban", None)
-            for _k in ("res_estado", "res_catnov"):
-                st.session_state.pop(_k, None)
-            st.session_state["res_min_av"] = 0
-            st.session_state["res_solo_pend"] = False
-            st.session_state["res_solo_nov"] = False
-            st.rerun()
+        st.button("🧹 Limpiar todos los filtros", width="stretch", key="limpiar_filtros",
+                  on_click=_limpiar_todos_los_filtros)
         if st.button("🔄 Recargar datos", width="stretch"):
             st.cache_data.clear()
             st.rerun()
@@ -2680,6 +2734,11 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
         datos_resumen = res.copy()  # sin fila TOTAL
 
         # ---------------- Filtros intuitivos de la vista ----------------
+        # Valores por defecto ANTES de crear los widgets: así el slider siempre tiene
+        # un valor definido y el reinicio por callback no choca con su instanciación.
+        for _k, _v in VALORES_FILTRO.items():
+            if _k.startswith("res_") and _v is not None:
+                st.session_state.setdefault(_k, _v)
         estados_posibles = ["Programada", "En proceso", "Finalizada", "Reprogramada",
                             "Reprogramada_Finalizada", "Sin cronograma"]
         tokens = {tok.strip() for v in datos_resumen["Estado cronograma"]
@@ -2691,8 +2750,6 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
             sel_est = st.multiselect("🗂️ Estado cronograma", options=presentes, default=presentes,
                                      key="res_estado", placeholder="Todos los estados")
         with f2:
-            if "res_min_av" not in st.session_state:
-                st.session_state["res_min_av"] = 0
             min_av = st.slider("🎯 Avance mínimo (%)", 0, 100, step=5,
                                key="res_min_av", help="Muestra oficinas con avance igual o mayor")
         with f3:
@@ -2731,13 +2788,11 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
             st.caption("ℹ️ Los filtros de **este resumen** son independientes de los KPIs "
                        "superiores (que usan el módulo y los filtros del sidebar).")
         with btn_f:
-            if st.button("♻️ Restablecer filtros del resumen", key=f"reset_res_{tipo}"):
-                for k in ("res_estado", "res_catnov"):
-                    st.session_state.pop(k, None)
-                st.session_state["res_min_av"] = 0
-                st.session_state["res_solo_pend"] = False
-                st.session_state["res_solo_nov"] = False
-                st.rerun()
+            # on_click: el reinicio corre ANTES de crear los widgets en el siguiente
+            # rerun. Escribir en session_state aquí dentro lanzaría
+            # StreamlitWidgetAlreadyInstantiatedError (los filtros de arriba ya existen).
+            st.button("♻️ Restablecer filtros del resumen", key=f"reset_res_{tipo}",
+                      width="stretch", on_click=_limpiar_filtros_resumen)
 
         if vis.empty:
             st.info("Sin oficinas que cumplan los filtros del resumen.")
@@ -2974,31 +3029,19 @@ def main():
         df.loc[df["_componente"].eq("C2"), "Facturable"] = "Si"
 
     # --- Selector de módulo (se elige antes que los filtros) ---
+    # El reinicio de filtros al cambiar de módulo se hace con on_change (callback),
+    # nunca escribiendo en session_state después de crear los widgets de filtro.
     opciones_mod = ["Componente 1", "Componente 2 (Impresoras láser)", "UPS"]
     if hasattr(st, "segmented_control"):
         modulo = st.segmented_control("Módulo", opciones_mod,
-                                      default=opciones_mod[0], key="modulo")
+                                      default=opciones_mod[0], key="modulo",
+                                      on_change=_reset_filtros_por_modulo)
     else:
-        modulo = st.radio("Módulo", opciones_mod, horizontal=True, key="modulo")
+        modulo = st.radio("Módulo", opciones_mod, horizontal=True, key="modulo",
+                          on_change=_reset_filtros_por_modulo)
     modulo = modulo or opciones_mod[0]
     cod_mod = {"Componente 1": "C1", "Componente 2 (Impresoras láser)": "C2",
                "UPS": "UPS"}[modulo]
-
-    # Al cambiar de módulo se reinician los filtros que podrían dejarlo vacío
-    # (p. ej. atribución BANCO (Si) en Componente 2, que es 100% No facturable).
-    if st.session_state.get("_modulo_prev") != modulo:
-        st.session_state["_modulo_prev"] = modulo
-        st.session_state["f_atrib"] = "Todos"
-        st.session_state.pop("seg_fact", None)   # el selector de facturación se reinicia
-        st.session_state["f_oficinas"] = []
-        st.session_state["f_solo_pend"] = False
-        # Filtros internos del cuadro "Resumen por oficina"
-        for k in ("res_estado", "res_catnov"):
-            st.session_state.pop(k, None)
-        st.session_state["res_min_av"] = 0
-        st.session_state["res_solo_pend"] = False
-        st.session_state["res_solo_nov"] = False
-        st.session_state.pop("click_sban", None)
 
     seleccion, solo_pendientes, f_attr = render_sidebar(df, cod_mod)
 
@@ -3060,18 +3103,16 @@ def main():
         if seleccion:
             st.warning(f"Las oficinas seleccionadas no tienen elementos de **{modulo}**. "
                        "Quita el filtro de Oficina para ver el módulo completo.")
-            if st.button("🧹 Quitar filtro de oficinas", key="limpiar_oficinas"):
-                st.session_state["f_oficinas"] = []
-                st.rerun()
+            st.button("🧹 Quitar filtro de oficinas", key="limpiar_oficinas",
+                      on_click=_quitar_filtro, args=("f_oficinas",))
         elif solo_pendientes and not base_mod.empty and bool(base_mod["_mt"].all()):
             st.success(f"🎉 Todos los elementos de **{modulo}** ya tienen MT3.")
         elif f_attr != "T" and not base_mod.empty:
             nombre_atr = "BANCO (Facturable Si)" if f_attr == "Si" else "COLSOF (No facturable)"
             st.warning(f"El módulo **{modulo}** no tiene elementos **{nombre_atr}**. "
                        "Cambia la atribución a **Todos** para verlo.")
-            if st.button("🧹 Ver todos (atribución Todos)", key="limpiar_atrib"):
-                st.session_state["f_atrib"] = "Todos"
-                st.rerun()
+            st.button("🧹 Ver todos (atribución Todos)", key="limpiar_atrib",
+                      on_click=_quitar_filtro, args=("f_atrib",))
         else:
             st.warning(f"Sin datos para **{modulo}** con los filtros seleccionados. "
                        "Revisa el filtro de Oficina o la atribución.")
@@ -3184,6 +3225,14 @@ def main():
                 etiqueta = str(pts[0].get("y") or pts[0].get("x") or "")
                 candidato = etiqueta[:5]
                 if candidato.isdigit() and st.session_state.get("click_sban") != candidato:
+                    # El widget de oficinas ya se creó en este run: si la sede no está
+                    # en su lista de opciones, asignar 'click_sban' directamente lanzaría
+                    # StreamlitWidgetAlreadyInstantiatedError. En ese caso se limpia
+                    # primero la selección (el widget se recrea en el rerun siguiente).
+                    oficinas = st.session_state.get("f_oficinas") or []
+                    if oficinas and not any(str(o).startswith(f"{candidato} - ")
+                                            for o in oficinas):
+                        st.session_state["f_oficinas"] = []
                     st.session_state["click_sban"] = candidato
                     st.rerun()
             st.caption("💡 Haz clic en una barra para filtrar el panel por esa sede.")

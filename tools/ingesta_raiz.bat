@@ -1,7 +1,10 @@
 @echo off
 chcp 65001>nul
-cd /d "%~dp0"
 title Ingesta diaria - Panel MT3
+REM Ubica la raiz del proyecto (funciona desde la raiz o desde "Ingesta de datos diaria")
+set "RAIZ=%~dp0"
+if not exist "%RAIZ%ingesta.py" set "RAIZ=%~dp0..\"
+cd /d "%RAIZ%"
 echo ==========================================================
 echo   INGESTA DIARIA - PANEL MANTENIMIENTO PREVENTIVO 3
 echo ==========================================================

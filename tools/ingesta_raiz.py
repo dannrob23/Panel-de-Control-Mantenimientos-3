@@ -59,8 +59,26 @@ def ahora() -> datetime:
 # =============================================================================
 # 1) CONFIGURACION  <<<<<<  EDITA SOLO ESTA SECCION
 # =============================================================================
-BASE = Path(__file__).resolve().parent                 # carpeta del proyecto
-ORIGEN = BASE / "Ingesta de datos diaria"              # (1) de donde se leen los Excel
+NOMBRE_CARPETA_INGESTA = "Ingesta de datos diaria"
+
+
+def _raiz_del_proyecto() -> Path:
+    """Ubica la carpeta del proyecto aunque este script esté dentro de otra carpeta.
+
+    Así funciona igual si se ejecuta desde la raíz del proyecto o desde
+    `Ingesta de datos diaria`: sube por los directorios hasta encontrar la carpeta
+    que contiene `deploy_panel` (o `app.py`).
+    """
+    marcas = ("deploy_panel", "app.py")
+    aqui = Path(__file__).resolve().parent
+    for carpeta in (aqui, *aqui.parents):
+        if any((carpeta / m).exists() for m in marcas):
+            return carpeta
+    return aqui
+
+
+BASE = _raiz_del_proyecto()                            # carpeta del proyecto
+ORIGEN = BASE / NOMBRE_CARPETA_INGESTA                 # (1) de donde se leen los Excel
 DATA_LOCAL = BASE / "data"                             # (2) copia local para ver en tu PC
 DATA_DEPLOY = BASE / "deploy_panel" / "data"           # (3) datos que ve la web publica
 APP_DEPLOY = BASE / "deploy_panel"                     # (4) repositorio git que se publica

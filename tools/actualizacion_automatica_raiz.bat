@@ -1,7 +1,10 @@
 @echo off
 chcp 65001>nul
-cd /d "%~dp0"
 title Actualizacion automatica del panel MT3
+REM Ubica la raiz del proyecto (funciona desde la raiz o desde "Ingesta de datos diaria")
+set "RAIZ=%~dp0"
+if not exist "%RAIZ%vigilar_ingesta.py" set "RAIZ=%~dp0..\"
+cd /d "%RAIZ%"
 echo ==========================================================
 echo   ACTUALIZACION AUTOMATICA DEL PANEL MT3
 echo ==========================================================

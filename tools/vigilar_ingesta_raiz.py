@@ -35,9 +35,28 @@ from pathlib import Path
 # =============================================================================
 # 1) CONFIGURACION  <<<<<<  EDITA SOLO ESTA SECCION
 # =============================================================================
-BASE = Path(__file__).resolve().parent
-CARPETA = BASE / "Ingesta de datos diaria"   # carpeta que se vigila
-PUBLICAR = True                              # True = además hace commit + push
+NOMBRE_CARPETA_INGESTA = "Ingesta de datos diaria"
+
+
+def _raiz_del_proyecto() -> Path:
+    """Carpeta del proyecto: la que contiene `ingesta.py` (o `deploy_panel`).
+
+    Así el script funciona igual si se ejecuta desde la raíz del proyecto o desde
+    `Ingesta de datos diaria` (donde también puede haber una copia de los scripts).
+    """
+    aqui = Path(__file__).resolve().parent
+    for carpeta in (aqui, *aqui.parents):
+        if (carpeta / "ingesta.py").exists() or (carpeta / "deploy_panel").exists():
+            # Ojo: si estamos DENTRO de la carpeta de ingesta, subir un nivel más.
+            if carpeta.name.lower() == NOMBRE_CARPETA_INGESTA.lower():
+                continue
+            return carpeta
+    return aqui
+
+
+BASE = _raiz_del_proyecto()
+CARPETA = BASE / NOMBRE_CARPETA_INGESTA       # carpeta que se vigila
+PUBLICAR = True                               # True = además hace commit + push
 
 CADA_SEGUNDOS = 5        # cada cuánto revisa la carpeta
 ESPERA_SEGUNDOS = 25     # espera a que el archivo deje de cambiar (copias grandes)
@@ -100,7 +119,13 @@ def huella(archivos: list) -> str:
 def clasificar(archivos: list) -> tuple:
     """Separa en reconocibles y no reconocidos, reutilizando la lógica de ingesta.py."""
     sys.path.insert(0, str(BASE))
-    import ingesta  # noqa: PLC0415
+    import importlib.util  # noqa: PLC0415
+    # Se carga el ingesta.py de la RAÍZ del proyecto de forma explícita, para que no
+    # se confunda con la copia que puede haber en la carpeta de ingesta.
+    ruta_ingesta = BASE / "ingesta.py"
+    espec = importlib.util.spec_from_file_location("ingesta_raiz", ruta_ingesta)
+    ingesta = importlib.util.module_from_spec(espec)
+    espec.loader.exec_module(ingesta)
     reconocidos, otros = {}, []
     for p in archivos:
         tipo = ingesta.tipo_de_archivo(p)

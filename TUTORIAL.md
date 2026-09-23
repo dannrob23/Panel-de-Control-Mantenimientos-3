@@ -313,6 +313,11 @@ Sin ese archivo, el panel se ve como la vista pública (solo consulta).
 La ventana muestra lo que va pasando (`📥 Detecté un cambio`, `✅ Listo…`) y queda registrado en
 `tools\ingesta_auto.log`. Si la cierras, deja de vigilar; si la vuelves a abrir, sigue.
 
+> 📍 **¿Dónde está el `.bat`?** Lo tienes en **dos sitios**: en la carpeta del proyecto y **dentro de
+> `Ingesta de datos diaria`** (junto a los Excel). Sirve el que te quede más cómodo: los dos hacen
+> lo mismo, porque el script ubica el proyecto solo. Si editas un script, edítalo en la carpeta del
+> proyecto y avísame para volver a copiarlo.
+
 ### Flujo manual (si prefieres controlarlo tú)
 1. Guarda los Excel del día (Data, Cronograma, Campos) en la carpeta **`Ingesta de datos diaria`**
    (hermana del proyecto). El archivo **Campos dashboard** debe traer la hoja `Dashboard_KPI` con la

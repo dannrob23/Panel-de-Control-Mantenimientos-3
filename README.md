@@ -120,6 +120,12 @@ Nada más que hacer. El avance se puede seguir en la ventana y queda registrado 
 
 Ajustes al inicio de `vigilar_ingesta.py` (`CADA_SEGUNDOS`, `ESPERA_SEGUNDOS`, `PUBLICAR`).
 
+> 📍 **Los scripts también están dentro de `Ingesta de datos diaria`**, así los tienes a mano
+> donde mismo dejas los Excel. Funcionan igual desde ahí porque **detectan solos la raíz del
+> proyecto** (suben por las carpetas hasta encontrarla). Ojo: si los editas, **edítalos en la
+> raíz** y vuelve a copiarlos — o pide que se copien de nuevo — para no tener dos versiones
+> distintas. Los `.xlsx` y los scripts conviven sin problema: la ingesta solo lee `.xlsx`.
+
 ---
 
 ## 📥 Actualización manual (si prefieres controlarla tú)

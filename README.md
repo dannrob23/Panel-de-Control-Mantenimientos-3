@@ -99,7 +99,30 @@ streamlit run app.py            # http://localhost:8501
 
 ---
 
-## 📥 Actualización diaria de datos (un solo script)
+## 🤖 Actualización AUTOMÁTICA (recomendado)
+
+Doble clic en **`actualizacion_automatica.bat`** y **deja la ventana abierta**. A partir de ahí:
+
+1. Guardas los Excel del día en **`Ingesta de datos diaria`** (como siempre).
+2. El vigilante **detecta el cambio solo** (revisa cada 5 s).
+3. Espera a que el archivo **termine de copiarse** (25 s sin cambios) — así no publica a medias.
+4. Ejecuta la ingesta: ajusta columnas, valida, anonimiza y escribe `data/` + `deploy_panel/data/`.
+5. Hace **commit + push** a GitHub y Streamlit Cloud redespliega (1-2 min).
+
+Nada más que hacer. El avance se puede seguir en la ventana y queda registrado en
+`tools\ingesta_auto.log`.
+
+| Comando | Qué hace |
+|---|---|
+| `actualizacion_automatica.bat` | Vigila y publica (uso normal) |
+| `python vigilar_ingesta.py --una-vez` | Revisa **una vez** y termina (sin quedarse vigilando) |
+| `python vigilar_ingesta.py --sin-publicar` | Actualiza los datos pero **no** sube a GitHub |
+
+Ajustes al inicio de `vigilar_ingesta.py` (`CADA_SEGUNDOS`, `ESPERA_SEGUNDOS`, `PUBLICAR`).
+
+---
+
+## 📥 Actualización manual (si prefieres controlarla tú)
 
 Todo el flujo vive en **`ingesta.py`** y se lanza con doble clic en **`ingesta.bat`**:
 
@@ -164,16 +187,23 @@ o pedir ayuda.
 
 ```
 app.py                     Aplicación principal (Streamlit)
+actualizacion_automatica.bat  Doble clic: vigila la carpeta y publica solo (uso normal)
+vigilar_ingesta.py         El vigilante: detecta archivos nuevos y llama a la ingesta
 ingesta.py / ingesta.bat   Ingesta diaria: ajusta columnas, valida, publica y hace push
 TUTORIAL.md                Guía de uso para usuarios y administradores
 actualizar_panel.bat       Trae los últimos cambios del repositorio (git pull)
 tools/analisis_ingesta.md  Reporte de columnas de los Excel del día (lo genera ingesta.py)
+tools/ingesta_auto.log     Registro de lo que hizo el vigilante
 data/                      Excel vigentes + ultima_actualizacion.json
 .streamlit/config.toml     Tema base y configuración del servidor
 .streamlit/secrets.toml    🔒 Local (ignorado por git): modo_admin / modo_publico
 uploads/                   (ignorado por git) archivos subidos por el uploader + bitácora
-requirements.txt           streamlit · pandas · openpyxl · plotly
+requirements.txt           streamlit · pandas · numpy · openpyxl · plotly
 ```
+
+> 📦 La raíz del proyecto **no es un repositorio git** (el repo es `deploy_panel/`). Para que los
+> scripts queden respaldados en GitHub, la ingesta copia `ingesta.py`, `vigilar_ingesta.py` y los
+> `.bat` a `deploy_panel/tools/` con el sufijo `_raiz` (son copias: se editan **en la raíz**).
 
 `deploy_panel/` es el repositorio que se publica en Streamlit Cloud (tiene su propio git y su
 `data/`). Ahí vive **`sincronizar_app.py`**, que copia `app.py`, `README.md` y `TUTORIAL.md` desde la

@@ -303,7 +303,17 @@ modo_admin = true
 ```
 Sin ese archivo, el panel se ve como la vista pública (solo consulta).
 
-### Flujo correcto de publicación (paso a paso)
+### 🤖 Lo más fácil: que se actualice solo
+
+1. Doble clic en **`actualizacion_automatica.bat`** y **deja la ventana abierta**.
+2. Guarda los Excel del día en la carpeta **`Ingesta de datos diaria`** (como siempre).
+3. Ya está: el panel detecta los archivos, espera a que terminen de copiarse, actualiza los datos
+   y **publica solo en GitHub**. En 1-2 minutos la web está al día (recarga con **Ctrl+F5**).
+
+La ventana muestra lo que va pasando (`📥 Detecté un cambio`, `✅ Listo…`) y queda registrado en
+`tools\ingesta_auto.log`. Si la cierras, deja de vigilar; si la vuelves a abrir, sigue.
+
+### Flujo manual (si prefieres controlarlo tú)
 1. Guarda los Excel del día (Data, Cronograma, Campos) en la carpeta **`Ingesta de datos diaria`**
    (hermana del proyecto). El archivo **Campos dashboard** debe traer la hoja `Dashboard_KPI` con la
    columna **AP «ESTADO UPS»** y la hoja `Novedades Equipos` (novedades de las oficinas).

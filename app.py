@@ -2382,7 +2382,8 @@ def _texto_contraste(escala, frac):
     return "#0A0E14" if lum > 0.55 else "#FFFFFF"
 
 
-def grafico_heatmap(datos: pd.DataFrame, metrica: str = "avance"):
+def grafico_heatmap(datos: pd.DataFrame, metrica: str = "avance",
+                    incluir_sin_cronograma: bool = False):
     """Mapa de calor Regional × Estado de la sede. Simple y sin texto encimado.
 
     Reglas de dibujo (una sola línea por celda, siempre):
@@ -2396,6 +2397,9 @@ def grafico_heatmap(datos: pd.DataFrame, metrica: str = "avance"):
       «—» y las terminadas «✓»).
     - `metrica="pendientes"`: cada celda muestra **cuántos equipos faltan**, con el mismo
       color de avance, para ubicar de un vistazo los cruces más atrasados.
+    - `incluir_sin_cronograma=False` (por defecto): **no se dibuja la columna
+      «Sin cronograma»**. Agrupa las sedes que no están en el cronograma (sobre todo bodegas
+      y stock) y no aporta a la lectura por Regional.
     """
     t = tema_actual()
     if "Regional" not in datos.columns or "_est_crono" not in datos.columns:
@@ -2404,6 +2408,8 @@ def grafico_heatmap(datos: pd.DataFrame, metrica: str = "avance"):
     d["_est"] = (d["_est_crono"].astype(str)
                  .str.replace(r"^[^A-Za-zÁÉÍÓÚáéíóúñ]+", "", regex=True).str.strip())
     d.loc[d["_est"].isin(["", "nan", "None"]), "_est"] = "Sin cronograma"
+    if not incluir_sin_cronograma:
+        d = d[~d["_est"].eq("Sin cronograma")]
     reg = d["Regional"].astype(str).str.strip()
     d["_reg"] = reg.where(~reg.isin(["", "nan", "None"]), "SIN REGIONAL")
     d["_mt_int"] = d["_mt"].astype(int)

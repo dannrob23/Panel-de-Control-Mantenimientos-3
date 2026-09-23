@@ -45,10 +45,10 @@ Muestra, en tiempo real y de forma visual:
 │                                                                       │
 │  [🏢 Oficinas intervenidas] [📈 Avance MT3]                           │  ← destacadas (titular)
 │  [📦 Total] [✅ MT] [⚠️ Pendientes] [🏦 Facturables] [🏢 No fact.]   │  ← KPI de equipos
-│  [C1/C2/UPS 100% MT3] [🏁 Finalizadas (N)] [🔋 UPS finalizadas (AP)] │  ← KPI de oficinas
+│  [C1/C2/UPS completo] [🏁 Reportadas finalizadas] [🔋 UPS reportado]  │  ← KPI de oficinas
 │                                                                       │
 │  📈 Gráficos y avance │ 🏢 Resumen por oficina │ 📋 Gestión novedades │  ← pestañas
-│  (con el módulo UPS se agregan: 🔋 Avance UPS (col AP) · 📰 Novedades de las oficinas)
+│  (con el módulo UPS se agregan: 🔋 UPS: avance y diferencias · 📰 Novedades de las oficinas)
 └──────────────────────────────────────────────────────────────────────┘
    ☰ Barra lateral: Datos · Filtros · Auditoría y fuentes
 ```
@@ -56,13 +56,22 @@ Muestra, en tiempo real y de forma visual:
 ### Ruta rápida: cómo leer el panel en 4 pasos
 
 1. **Elige el módulo** arriba: `Componente 1`, `Componente 2 (impresoras láser)` o `UPS`.
-2. **Mira las 2 tarjetas destacadas**: *Oficinas intervenidas* (¿cuántas sedes empezamos?) y
+2. **Mira las 2 tarjetas destacadas**: *Oficinas intervenidas* (¿cuántas oficinas empezamos?) y
    *Avance MT3* (¿qué % del módulo está hecho?).
 3. **Revisa los KPI**: el bloque de **equipos** (total / realizados / pendientes) y el de **oficinas**
-   (cuántas están al **100%** y cómo está el **estado oficial** de la sede).
+   (cuántas tienen el componente **completo** y cómo va lo **reportado por la oficina**).
 4. **Baja a las pestañas** para entender el *por qué*: en **📈 Gráficos y avance** ves el ranking
    (¿quién acumula pendientes?), la **tendencia** (¿a qué ritmo vamos?) y el **mapa de calor**
    (¿dónde se concentra el atraso?).
+
+> 🗣️ **Dos fuentes, dos lenguajes.** El panel distingue siempre entre:
+> - **Lo que revisa el panel** (con la Data de ejecución): «*Oficinas con… completo*», «*Oficinas
+>   intervenidas*», «*Avance MT3*».
+> - **Lo que reporta la oficina** (en el archivo Campos dashboard): «*Oficinas reportadas como
+>   finalizadas*», «*UPS finalizadas (reportado)*».
+>
+> Si las dos cifras no coinciden, **no es un error**: son fuentes distintas y el panel te muestra
+> las diferencias en la pestaña **🔋 UPS: avance y diferencias**.
 
 ### Los "chips" del encabezado (siempre te dicen el estado)
 
@@ -111,9 +120,9 @@ Son el "titular" del panel: responden *¿cuántas oficinas ya trabajamos?* y *¿
 | 🏢 **Oficinas intervenidas** | Oficinas del **módulo activo** donde ya se empezó (al menos **1** MT3) | SBAN distintos con `≥1 MT3` ÷ SBAN distintos del módulo. **No** es el estado oficial de la sede |
 | 📈 **Avance MT3** | % de equipos ya subsanados en el filtro activo (con su barra) | `realizados ÷ total` |
 
-> ⚠️ **No confundir** *intervenida* con *100%*:
-> **intervenida** = ya empezaron (aunque sea 1 equipo) · **100% MT3** = terminaron **todos** los equipos.
-> Ejemplo real (Componente 1): **381 de 808** oficinas intervenidas, pero solo **265 de 806** están al 100%.
+> ⚠️ **No confundir** *intervenida* con *completa*:
+> **intervenida** = ya empezaron (aunque sea 1 equipo) · **completa** = terminaron **todos** los equipos.
+> Ejemplo real (Componente 1): **381 de 808** oficinas intervenidas, pero solo **265 de 806** están completas.
 > Por eso la primera cifra siempre es **mayor** que la segunda.
 
 ### Equipos del módulo (5 tarjetas)
@@ -128,21 +137,23 @@ Son el "titular" del panel: responden *¿cuántas oficinas ya trabajamos?* y *¿
 
 ### Oficinas (5 tarjetas)
 
-Todas usan **el mismo universo**: las **806 oficinas del archivo Campos dashboard** (una por SBAN), y
+Todas usan **el mismo universo** (las oficinas del archivo Campos dashboard, una por SBAN) y
 los **mismos filtros** (Oficina · Facturación · clic del ranking · solo pendientes). Por eso las cifras
 **no cambian al cambiar de módulo** y son comparables entre sí.
 
-| Indicador | Qué mide |
-|---|---|
-| 🧩 **Componente 1 / Componente 2 / UPS: oficinas 100% MT3** | Oficinas donde **todos** los equipos de ese componente tienen MT3 (control que calcula el panel con la Data) |
-| 🏁 **Oficinas finalizadas (Campos N)** | Estado **oficial** de la sede: columna N de Campos dashboard |
-| 🔋 **UPS finalizadas (col AP)** | Estado **oficial** de las UPS: columna AP «ESTADO UPS». Incluye cuántas oficinas ya reportaron ese dato |
+Los nombres están escritos **sin jerga interna**: dicen *quién* afirma el dato.
 
-> **Subsanado** = ya tiene mantenimiento hecho (consecutivo MT3). **Pendiente** = aún no lo tiene.
-> **Oficial** = lo que reporta la oficina en Campos dashboard. **Control** = lo que el panel calcula
-> cruzando la Data; sirve para detectar diferencias, no reemplaza el estado oficial.
+| Indicador | Quién lo dice | Qué mide |
+|---|---|---|
+| 🏢 **Oficinas con C1 / C2 / UPS completo** | **El panel** (revisa la Data de ejecución) | Oficinas donde **todos** los equipos de ese componente ya tienen mantenimiento hecho. Elijo el número como «completas de total» y el delta dice cuántas oficinas del archivo faltan |
+| 🏁 **Oficinas reportadas como finalizadas** | **La oficina** (archivo Campos dashboard) | Oficinas que la propia oficina marcó como `Finalizada` |
+| 🔋 **UPS finalizadas (reportado)** | **La oficina** (archivo Campos dashboard) | Oficinas que reportaron sus UPS como `Finalizado`, **sobre el total de oficinas** |
+
+> **Completo** = el panel comprobó que ya se le hizo mantenimiento a todos los equipos de esa oficina
+> (consecutivo MT3). **Reportado** = lo que la oficina escribió en el archivo; puede no coincidir con
+> la Data, y esa diferencia es justamente lo que el panel vigila.
 >
-> Los conteos de equipos (Total, Subsanados, Pendientes) viven **solo** en el bloque de Equipos; en las
+> Los conteos de equipos (Total, Realizados, Pendientes) viven **solo** en el bloque de Equipos; en las
 > tablas se repiten únicamente **por fila** (por oficina), no como total general.
 
 ---
@@ -223,24 +234,25 @@ y el botón **⬇️ Descargar Excel** (vista filtrada + gráficos + novedades).
 Los **totales de equipos** no se repiten como tarjetas aquí: están en las tarjetas KPI de arriba
 (esta vista solo los muestra **por fila**).
 
-### 🔋 Avance UPS (col AP) — solo en el módulo UPS
-Panel del avance de las UPS tomado de la **columna AP «ESTADO UPS»** del archivo Campos dashboard.
-Solo lista las oficinas **con UPS en la Data**:
+### 🔋 UPS: avance y diferencias — solo en el módulo UPS
+Pestaña para comparar **lo que reportó la oficina** (columna «ESTADO UPS» del archivo Campos) con
+**lo que el panel revisa en la Data**. Solo lista las oficinas **con UPS en la Data**:
 
 | Indicador | Qué mide |
 |---|---|
-| 🔋 **Cobertura col AP** | Oficinas con UPS que ya traen algún valor en esa columna |
-| 🧩 **Coinciden AP y MT3** | Oficinas donde la columna AP dice `Finalizado` **y** además todos sus UPS tienen MT3 |
-| 🟨 **En proceso · ⬜ Programadas** | Conteo de los demás estados de la columna AP |
-| ⚠️ **Diferencias AP vs MT3** | Oficinas donde el estado oficial y el control de MT3 no cuadran |
+| 🔋 **Oficinas que ya reportaron** | Oficinas con UPS que ya traen algún dato en el archivo |
+| 🧩 **Coinciden el reporte y la Data** | Oficinas donde el reporte dice `Finalizado` **y** además todos sus UPS tienen mantenimiento hecho |
+| 🟨 **En proceso · ⬜ Programadas** | Conteo de los demás casos reportados |
+| ⚠️ **Diferencias reporte vs Data** | Oficinas donde lo reportado y lo que muestra la Data no cuadran |
 
-> El conteo **oficial** de UPS finalizadas (tarjeta 🔋 «UPS finalizadas (col AP)») está en las tarjetas de
-> indicadores de oficinas, arriba: **no se repite** dentro de esta pestaña.
+> Los dos conteos generales (**🔋 UPS finalizadas (reportado)** y **🏢 Oficinas con UPS completo**)
+> están en las tarjetas de indicadores de oficinas, arriba: **no se repiten** aquí. Esta pestaña
+> existe para ver **dónde no coinciden**.
 
-La tabla muestra `SBAN · Oficina · UPS en Data · UPS con MT3 · Avance MT3 % · Estado UPS (col AP) ·
-Observación UPS · Alerta`, y el desplegable **❓ Conciliación** explica la diferencia entre el dato oficial
-(**229 UPS finalizadas en la columna AP**) y el control calculado con la Data —que puede no coincidir,
-justamente porque vienen de archivos distintos—. Puedes **descargar** el panel en CSV o Excel.
+La tabla muestra `SBAN · Oficina · UPS en Data · UPS con MT3 · Avance MT3 % · Estado reportado ·
+Observación UPS · Alerta`, y el desplegable **❓ Conciliación** explica la diferencia entre lo reportado
+por la oficina y lo que el panel calcula con la Data —que puede no coincidir, justamente porque vienen de
+fuentes distintas—. Puedes **descargar** el panel en CSV o Excel.
 
 ### 📰 Novedades de las oficinas — en todos los módulos
 Novedades reportadas por las oficinas (hoja **Novedades Equipos** del archivo Campos dashboard):
@@ -339,13 +351,13 @@ Doble clic en **`actualizar_panel.bat`** (trae los últimos cambios del reposito
 |---|---|
 | **SBAN** | Código de la oficina (5 dígitos) |
 | **MT3 / MT** | Mantenimiento preventivo 3 (el consecutivo asignado cuando se realiza) |
-| **Subsanado** | Equipo que ya tiene su mantenimiento hecho |
+| **Realizado** | Equipo que ya tiene su mantenimiento hecho |
 | **Pendiente** | Equipo que aún no tiene mantenimiento |
-| **Oficina intervenida** | Oficina donde ya se realizó **al menos 1** MT3 (avance **parcial**) |
-| **Oficina 100% MT3** | Oficina donde **todos** los equipos de ese componente tienen MT3 (avance **completo**) |
-| **Columna N** | Estado **oficial** de la sede en el archivo Campos dashboard |
-| **Columna AP** | Estado **oficial** del avance de las UPS en el archivo Campos dashboard |
-| **Oficial vs. control** | *Oficial* = lo que reporta la oficina (Campos) · *Control* = lo que el panel calcula con la Data. Sirven para detectar diferencias |
+| **Oficina intervenida** | Oficina donde ya se realizó **al menos 1** mantenimiento (avance **parcial**) |
+| **Oficina con … completo** | Oficina donde **todos** los equipos de ese componente ya tienen mantenimiento (avance **completo**). Lo **revisa el panel** con la Data |
+| **Reportado** | Lo que la **oficina** escribió en el archivo Campos dashboard (estado de la sede, estado de las UPS). Puede no coincidir con la Data |
+| **Campos dashboard** | Archivo que envía la oficina con el estado de cada sede y sus novedades |
+| **Data de ejecución** | Archivo con los equipos y los consecutivos de mantenimiento ya realizados |
 | **Cronograma** | Programación de las visitas/actividades por sede |
 | **Novedad** | Situación particular reportada de un equipo o sede |
 | **Facturable** | Equipo cuyo mantenimiento se factura al Banco (Si) o es gestión COLSOF (No) |

@@ -1287,68 +1287,70 @@ def render_avance_ups(k, df, seleccion=None):
     n_con_ups = int(con_ups.sum())
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🔋 Cobertura col AP", f"{reportadas} / {total}",
+    c1.metric("🔋 Oficinas que ya reportaron", f"{reportadas} de {total}",
               delta=f"{sin_rep} sin dato", delta_color="off", border=True,
-              help="Sedes **con UPS en la Data** que ya traen algún valor en la columna AP "
-                   "«ESTADO UPS». Las demás están en blanco: la oficina todavía no marca su avance.")
-    # NOTA: los conteos «oficiales» (col AP) y «100% MT3» ya están en las tarjetas de
-    # indicadores de oficinas; aquí NO se repiten. Esta tarjeta mide la CONCILIACIÓN
-    # (cuántas sedes coinciden), que es el propósito de esta pestaña.
-    c2.metric("🧩 Coinciden AP y MT3", f"{ambos}",
-              delta=f"de {n_con_ups} sedes con UPS", delta_color="off", border=True,
-              help="Sedes donde la columna AP dice `Finalizado` Y todos sus UPS de la Data "
-                   "tienen consecutivo MT3. Las dos cifras por separado están en las tarjetas "
-                   "«🔋 UPS finalizadas (col AP)» y «UPS: oficinas 100% MT3» de los indicadores.")
+              help="Oficinas **con UPS en la Data** que ya traen algún valor en la columna "
+                   "«ESTADO UPS» del archivo. Las demás están en blanco: la oficina todavía no "
+                   "marca su avance.")
+    # NOTA: los conteos de «reportado por la oficina» y «completo según la Data» ya están en
+    # las tarjetas de indicadores de oficinas; aquí NO se repiten. Esta tarjeta mide la
+    # CONCILIACIÓN (cuántas oficinas coinciden), que es el propósito de esta pestaña.
+    c2.metric("🧩 Coinciden el reporte y la Data", f"{ambos}",
+              delta=f"de {n_con_ups} oficinas con UPS", delta_color="off", border=True,
+              help="Oficinas donde el reporte dice `Finalizado` Y todos sus UPS de la Data "
+                   "tienen mantenimiento hecho. Los dos conteos por separado están en las "
+                   "tarjetas «🔋 UPS finalizadas (reportado)» y «🏢 Oficinas con UPS completo».")
     c3.metric("🟨 En proceso · ⬜ Programadas", f"{proc} · {prog}",
-              help="Conteo de la columna AP en los demás estados. " + (f"Sin dato: {sin_rep}."
-                   if sin_rep else "Todas las sedes tienen dato."), border=True)
-    c4.metric("⚠️ Diferencias AP vs MT3", f"{solo_ap + solo_mt3}",
+              help="Conteo del estado reportado en los demás casos. " + (f"Sin dato: {sin_rep}."
+                   if sin_rep else "Todas las oficinas tienen dato."), border=True)
+    c4.metric("⚠️ Diferencias reporte vs Data", f"{solo_ap + solo_mt3}",
               delta_color="inverse" if (solo_ap + solo_mt3) else "off",
               border=True,
-              help="Sedes donde la columna AP (oficial) y el control de MT3 calculado con la Data "
-                   "no coinciden. El detalle está en el desplegable de conciliación.")
+              help="Oficinas donde lo que reportó la oficina y lo que muestra la Data no "
+                   "coinciden. El detalle está en el desplegable de conciliación.")
 
-    with st.expander("❓ Conciliación: columna AP (oficial) vs control MT3 de la Data",
+    with st.expander("❓ Conciliación: lo reportado por la oficina vs la Data",
                      expanded=False):
         ejemplos_ap = ", ".join(t.loc[fin_ap & ~cien_mt3, "SBAN"].astype(str).tolist()[:6]) or "—"
         st.markdown(
             f"""
-Las dos cifras vienen de **archivos distintos** y no miden lo mismo. La **columna AP es el
-estado oficial**; el conteo de MT3 es un **control** que calcula el panel con la Data:
+Las dos cifras vienen de **fuentes distintas** y no miden lo mismo: una es **lo que reportó la
+oficina** y la otra es **lo que el panel revisa en la Data de ejecución**.
 
 | Fuente | Qué cuenta | Valor |
 |---|---|---|
-| **Campos dashboard · columna AP** (oficial) | Sedes que la oficina reportó como `Finalizado` | **{fin}** |
-| **Campos dashboard · columna AP** (cobertura) | Sedes con algún dato en la columna (de {total}) | **{reportadas}** |
-| **Data de ejecución** (control MT3) | Sedes donde **todos** los UPS cargados tienen consecutivo MT3 | **{n_cien}** |
+| **Reportado por la oficina** (archivo Campos) | Oficinas que reportaron sus UPS como `Finalizado` | **{fin}** |
+| **Reportado por la oficina** (avance del reporte) | Oficinas que ya traen algún dato (de {total}) | **{reportadas}** |
+| **Revisado por el panel** (Data de ejecución) | Oficinas donde **todos** sus UPS ya tienen mantenimiento hecho | **{n_cien}** |
 
-Al cruzar sede por sede ({n_con_ups} sedes con UPS en la Data):
+Al cruzar oficina por oficina ({n_con_ups} oficinas con UPS en la Data):
 
-- ✅ Coinciden en **{ambos}** sedes.
-- ⚠️ La col AP dice `Finalizado` pero **falta MT3** en **{solo_ap}** sede(s){f" (ej. {ejemplos_ap})" if solo_ap else ""}.
-- ℹ️ Están al **100% MT3** pero la col AP **no dice** `Finalizado`: **{solo_mt3}** sede(s) (aparecen en la columna **Alerta** de la tabla).
-- ⚪ **{sin_rep}** sede(s) todavía **no tienen el dato** en la columna AP: la oficina aún no lo ha marcado.
+- ✅ Coinciden en **{ambos}** oficinas.
+- ⚠️ La oficina reportó `Finalizado` pero **falta mantenimiento** en **{solo_ap}** oficina(s){f" (ej. {ejemplos_ap})" if solo_ap else ""}.
+- ℹ️ Todos sus UPS ya tienen mantenimiento pero **la oficina no lo reportó** como `Finalizado`: **{solo_mt3}** oficina(s) (aparecen en la columna **Alerta** de la tabla).
+- ⚪ **{sin_rep}** oficina(s) todavía **no reportaron** ese dato: siguen en blanco en el archivo.
 
-> 💡 Por eso el indicador principal es **{fin}** (columna AP) y el control de MT3 (**{n_cien}**)
-> solo se usa para detectar estas diferencias, no para reemplazar el estado reportado.
+> 💡 Por eso el indicador principal es **{fin}** (lo reportado) y el chequeo con la Data
+> (**{n_cien}**) solo sirve para detectar estas diferencias, no para reemplazar lo reportado.
 """
         )
         detalle = t.loc[(fin_ap & ~cien_mt3) | (~fin_ap & cien_mt3),
                         ["SBAN", "Oficina", "UPS en Data", "UPS con MT3",
                          "Estado UPS normalizado"]].copy()
         detalle["Diferencia"] = [
-            "Col AP dice Finalizado, pero falta MT3" if f else "100% MT3, pero la col AP no dice Finalizado"
+            "La oficina reportó Finalizado, pero falta mantenimiento"
+            if f else "Todo con mantenimiento, pero la oficina no lo reportó como Finalizado"
             for f in detalle["Estado UPS normalizado"].eq("Finalizada")
         ]
-        st.dataframe(detalle.rename(columns={"Estado UPS normalizado": "Estado UPS (col AP)"}),
+        st.dataframe(detalle.rename(columns={"Estado UPS normalizado": "Estado reportado"}),
                      hide_index=True, width="stretch",
                      column_config={
                          "SBAN": st.column_config.TextColumn("SBAN", width="small"),
                          "Oficina": st.column_config.TextColumn("Oficina", width="medium"),
                          "UPS en Data": st.column_config.NumberColumn("UPS en Data", width="small"),
                          "UPS con MT3": st.column_config.NumberColumn("UPS con MT3", width="small"),
-                         "Estado UPS (col AP)": st.column_config.TextColumn(
-                             "Estado UPS (col AP)", width="small"),
+                         "Estado reportado": st.column_config.TextColumn(
+                             "Estado reportado", width="small"),
                          "Diferencia": st.column_config.TextColumn("Diferencia", width="large"),
                      })
 
@@ -1358,11 +1360,11 @@ Al cruzar sede por sede ({n_con_ups} sedes con UPS en la Data):
     t = t.sort_values(["_rep", "_o", "SBAN"]).drop(columns=["_o", "_rep"]).reset_index(drop=True)
 
     vista = t.copy()
-    vista["Estado UPS (col AP)"] = vista["Estado UPS"].apply(
+    vista["Estado reportado"] = vista["Estado UPS"].apply(
         lambda v: _badge_estado(normalizar_estado_ups(v)) if str(v).strip() else "⚪ Sin reporte")
     vista["Oficina"] = vista["Oficina"].fillna("").astype(str)
     cols_vista = ["SBAN", "Oficina", "UPS en Data", "UPS con MT3", "Avance MT3 %",
-                  "Estado UPS (col AP)", "Observación UPS", "Alerta"]
+                  "Estado reportado", "Observación UPS", "Alerta"]
     if MODO_PUBLICO:
         vista["Observación UPS"] = ""
     st.dataframe(
@@ -1374,15 +1376,15 @@ Al cruzar sede por sede ({n_con_ups} sedes con UPS en la Data):
             "UPS con MT3": st.column_config.NumberColumn("UPS con MT3", width="small"),
             "Avance MT3 %": st.column_config.ProgressColumn(
                 "Avance MT3 %", min_value=0, max_value=100, format="%.0f%%", width="small"),
-            "Estado UPS (col AP)": st.column_config.TextColumn(
-                "Estado UPS (col AP)", width="small",
-                help="Valor textual de la columna AP del archivo Campos dashboard."),
+            "Estado reportado": st.column_config.TextColumn(
+                "Estado reportado", width="small",
+                help="Lo que la oficina escribió para esa sede en el archivo Campos dashboard."),
             "Observación UPS": st.column_config.TextColumn(
                 "Observación UPS", width="large",
-                help="Columna AQ «OBSERVACIONES» del archivo Campos dashboard."),
+                help="Observación que la oficina dejó para esas UPS en el archivo Campos."),
             "Alerta": st.column_config.TextColumn(
                 "Alerta", width="medium",
-                help="Cruce entre la col AP y el avance real de UPS en la Data."),
+                help="Diferencia entre lo reportado por la oficina y lo que muestra la Data."),
         },
     )
     c1, c2 = st.columns(2)
@@ -1901,12 +1903,12 @@ def oficinas_campos(kpi_campos, seleccion=None, click_sban=None):
 
 
 def tarjetas_destacadas(datos: pd.DataFrame):
-    """KPIs destacados: oficinas intervenidas (control con la Data) y avance MT3.
+    """KPIs destacados: oficinas intervenidas (revisado con la Data) y avance MT3.
 
-    «Oficinas intervenidas» = oficinas con al menos 1 MT3 en el módulo activo: es un
-    CONTROL calculado con la Data, distinto del estado OFICIAL de la sede (col N de
-    Campos), que se muestra en «🏁 Oficinas finalizadas (Campos N)». Así las dos cifras
-    no comparten etiqueta ni se confunden.
+    «Oficinas intervenidas» = oficinas con al menos 1 equipo con mantenimiento hecho en el
+    módulo activo: es una revisión que hace el panel con la Data, distinta de lo que la
+    oficina reporta en el archivo Campos, que se muestra en «🏁 Oficinas reportadas como
+    finalizadas». Así las dos cifras no comparten etiqueta ni se confunden.
 
     `datos` debe llegar SIN el filtro de tabla «solo pendientes»: ese filtro deja solo
     filas sin MT3, así que aplicarlo aquí haría caer el numerador a 0. El numerador y el
@@ -1999,16 +2001,22 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
                          solo_pendientes=False):
     """Tarjetas de OFICINAS, todas con el mismo universo y los mismos filtros.
 
-    Universo = oficinas de Campos dashboard (una fila por SBAN, 806). Las 5 tarjetas
+    Universo = oficinas del archivo Campos dashboard (una por SBAN). Las 5 tarjetas
     aplican los MISMOS filtros (Oficina · Facturación 🏦/🏢 · clic del ranking ·
     solo pendientes) y **no** dependen del módulo activo, para que sus cifras sean
     siempre comparables y no cambien al cambiar de pestaña de módulo.
 
-    - 3 tarjetas de componente: oficinas **con el componente** y cuántas están al
-      **100% MT3**. El tooltip dice cuántas quedan fuera por los filtros y cuántas
-      oficinas tiene el archivo (806).
-    - `🏁 Oficinas finalizadas (Campos N)`: columna N del archivo, por SBAN único.
-    - `🔋 UPS finalizadas (col AP)`: fuente OFICIAL del avance UPS, columna AP.
+    Nomenclatura pensada para el usuario final (sin jerga interna):
+
+    - `🏢 Oficinas con <componente> completo` = el panel revisa la Data de ejecución y
+      cuenta las oficinas donde TODOS los equipos de ese componente tienen consecutivo
+      MT3. El valor se muestra como "completas de total" y el delta dice cuántas
+      oficinas del archivo faltan. El tooltip explica qué queda fuera por los filtros.
+    - `🏁 Oficinas reportadas como finalizadas` = lo que reportó la oficina en el archivo
+      Campos dashboard (columna «Estado de la sede»), contado por SBAN único.
+    - `🔋 UPS finalizadas (reportado)` = lo que reportó la oficina en la columna
+      «ESTADO UPS» del archivo, mostrado sobre el total de oficinas (no sobre las
+      reportadas: un "100% de las reportadas" ocultaría las que aún no reportan).
 
     `cod_mod` se recibe para documentar el módulo activo, pero las cifras se calculan
     para los 3 componentes siempre (así no cambian al cambiar de módulo).
@@ -2041,10 +2049,9 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
     if solo_pendientes:
         etiqueta_filtro += " · solo pendientes"
 
-    st.markdown("##### 🏢 Indicadores de oficinas "
-                f"<span style='font-size:.8rem;font-weight:500'>({etiqueta_filtro} · "
-                f"{n_filtro} de {n_universo} oficinas del archivo)</span>",
-                unsafe_allow_html=True)
+    st.markdown("##### 🏢 Indicadores de oficinas")
+    st.caption(f"{etiqueta_filtro} · se están contando **{n_filtro}** de las "
+               f"**{n_universo}** oficinas del archivo.")
     cols = st.columns(5)
 
     for col, (cod, nombre) in zip(cols[:3], [("C1", "Componente 1"),
@@ -2055,7 +2062,8 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
         sub_global = (df[df["_componente"].eq(cod)] if "_componente" in df.columns
                       else df.iloc[0:0])
         if sub.empty:
-            col.metric(f"{nombre}: oficinas 100% MT3", "0 / 0",
+            col.metric(f"🏢 Oficinas con {nombre} completo", "0 de 0",
+                       delta=f"{n_universo} pendientes",
                        help=f"Ninguna oficina con {nombre} cumple los filtros actuales.",
                        border=True)
             continue
@@ -2064,9 +2072,10 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
         total = int(visibles.sum())
         completas = int((g["sum"] >= g["size"])[visibles].sum())
         pct = (completas / total * 100) if total else 0.0
-        ayuda = (f"CONTROL MT3, calculado por el panel con la Data de ejecución (no es un estado "
-                 f"oficial): oficinas donde TODOS los elementos de {nombre} tienen consecutivo MT3 "
-                 f"→ {completas} de {total} oficinas que cumplen: {etiqueta_filtro.lower()}.")
+        ayuda = (f"**Completo** = la oficina ya tiene el mantenimiento hecho en TODOS sus "
+                 f"equipos de {nombre} (consecutivo MT3). Calculado por el panel con la Data "
+                 f"de ejecución: {completas} de {total} oficinas que cumplen "
+                 f"{etiqueta_filtro.lower()}.")
         if len(b) < len(df):
             # Cuántas oficinas con ese componente quedan FUERA por los filtros activos.
             fuera = len((set(sub_global["_SBAN"].astype(str)) & universo)
@@ -2074,56 +2083,58 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
             if fuera:
                 ayuda += (f" Los filtros dejan fuera {fuera} oficina(s) que sí tienen {nombre} "
                           f"(el archivo tiene {n_universo} oficinas en total).")
-        col.metric(f"{nombre}: oficinas 100% MT3", f"{completas} / {total}",
-                   delta=f"{pct:.0f}% completas", help=ayuda, border=True)
+        col.metric(f"🏢 Oficinas con {nombre} completo", f"{completas} de {total}",
+                   delta=f"{n_universo - completas} pendientes en el archivo",
+                   delta_color="off", help=ayuda, border=True)
 
     with cols[3]:
         if universo and _col(kpi_campos, "Estado de la sede") is not None:
             tot = n_universo
             pct = (fin_n / tot * 100) if tot else 0.0
             cols[3].metric(
-                "🏁 Oficinas finalizadas (Campos N)", f"{fin_n} / {tot}",
-                delta=f"{pct:.0f}% del archivo",
-                help="Estado OFICIAL de la sede: columna N ('Estado de la sede') de Campos "
-                     "dashboard, contada por SBAN único (una sede con varias filas se resume por "
-                     "la de mayor prioridad: Finalizada > Reprogramada_Finalizada > En proceso > "
-                     "Programada). No es lo mismo que «Oficinas intervenidas» (control con la Data). "
-                     "'Reprogramada_Finalizada' se contabiliza aparte.",
+                "🏁 Oficinas reportadas como finalizadas", f"{fin_n} de {tot}",
+                delta=f"{tot - fin_n} pendientes por reportar",
+                delta_color="off",
+                help="Estado de la sede SEGÚN LA OFICINA: columna «Estado de la sede» del archivo "
+                     "Campos dashboard, contada por SBAN único (una sede con varias filas se "
+                     "resume por la de mayor prioridad: Finalizada > Reprogramada_Finalizada > "
+                     "En proceso > Programada). Es distinto de «Oficinas con … completo», que el "
+                     "panel calcula con la Data. 'Reprogramada_Finalizada' se cuenta aparte.",
                 border=True,
             )
         else:
-            cols[3].metric("🏁 Oficinas finalizadas (Campos N)", "n/d",
+            cols[3].metric("🏁 Oficinas reportadas como finalizadas", "n/d",
                            help="Campos dashboard no disponible", border=True)
 
     # Estado OFICIAL de las UPS: columna AP «ESTADO UPS» de Campos dashboard.
-    # El conteo calculado con la Data (100% MT3) NO se repite aquí: vive como alerta
-    # y en el desplegable de conciliación de la pestaña 🔋 Avance UPS (col AP).
+    # El conteo calculado con la Data (equipos completos) NO se repite aquí: vive como
+    # alerta y en el desplegable de conciliación de la pestaña 🔋 Avance UPS.
     with cols[4]:
         if rep_ap or fin_ap:
-            con_ups = set(df.loc[df["_componente"].eq("UPS"), "_SBAN"].astype(str))
-            pend_u = len(con_ups - set(universo))
             cols[4].metric(
-                "🔋 UPS finalizadas (col AP)", f"{fin_ap}",
-                delta=f"{fin_ap/rep_ap*100:.0f}% de las reportadas" if rep_ap else None,
-                help="Fuente OFICIAL del avance UPS: columna AP «ESTADO UPS» de Campos dashboard, "
-                     f"contada por SBAN único. Reportadas: {rep_ap} de {n_universo} oficinas. "
-                     f"{pend_u} oficina(s) con UPS no están en el archivo. "
-                     "El avance calculado con la Data (100% MT3) no se repite aquí: se usa como "
-                     "alerta de consistencia en la pestaña 🔋 Avance UPS (col AP).",
+                "🔋 UPS finalizadas (reportado)", f"{fin_ap} de {n_universo}",
+                delta=f"{n_universo - fin_ap} sin reportar",
+                delta_color="off",
+                help="Lo que la oficina reportó en la columna «ESTADO UPS» del archivo Campos "
+                     f"dashboard, contada por SBAN único: {fin_ap} oficinas con 'Finalizado' de "
+                     f"{n_universo}. Las otras {n_universo - fin_ap} todavía no traen ese dato.",
                 border=True,
             )
         else:
-            cols[4].metric("🔋 UPS finalizadas (col AP)", "n/d",
-                           help="Campos dashboard sin columna «ESTADO UPS»", border=True)
+            cols[4].metric("🔋 UPS finalizadas (reportado)", "n/d",
+                           help="Campos dashboard sin la columna de estado de UPS", border=True)
 
-    st.caption("**Todas las tarjetas usan el mismo universo** (las "
-               f"{n_universo} oficinas de Campos dashboard, una por SBAN) y los mismos filtros "
-               "(Oficina · Facturación · clic del ranking · solo pendientes). "
-               "**Componentes 100% MT3** = control calculado con la Data (numerador y denominador "
-               "cambian juntos con el filtro). **Campos N** y **col AP** = estado oficial del "
-               "archivo, contado por SBAN único. "
-               + (f"La Data trae {n_datos} oficinas: {n_datos - n_universo} de ellas no está(n) en "
-                  "Campos y por eso no entra(n) en las tarjetas." if n_datos > n_universo else ""))
+    st.caption("**Cómo leer estas tarjetas.** Todas usan el mismo universo (las "
+               f"{n_universo} oficinas del archivo) y los mismos filtros: Oficina · Facturación · "
+               "clic del ranking · solo pendientes. "
+               "**«Oficinas con … completo»** = el panel revisa la Data de ejecución y cuenta las "
+               "oficinas donde ya se le hizo mantenimiento a TODOS sus equipos. "
+               "**«Oficinas reportadas como finalizadas»** y **«UPS finalizadas (reportado)»** = "
+               "lo que la propia oficina reportó en el archivo Campos dashboard. "
+               "Son fuentes distintas: por eso pueden no coincidir (las diferencias se detallan en "
+               "la pestaña 🔋 Avance UPS)."
+               + (f" La Data trae {n_datos} oficinas: {n_datos - n_universo} de ellas no está(n) "
+                  "en el archivo y no entran en las tarjetas." if n_datos > n_universo else ""))
 
 
 # ----------------------------------------------------------------------------
@@ -3059,12 +3070,12 @@ def main():
                 df["_est_crono"] = df["_SBAN"].map(mapa_ups).fillna("")
                 sin_rep = df["_est_crono"].astype(str).str.strip().eq("")
                 df.loc[sin_rep, "_est_crono"] = "Sin cronograma"
-                ups_fuente = "Campos dashboard · col AP «ESTADO UPS»"
+                ups_fuente = "lo reportado por la oficina en el archivo Campos dashboard"
         if not ups_fuente and crono_ups is not None and not crono_ups.empty:
             est_ups = estados_ups(df, crono_ups)
             df["_est_crono"] = df["_SBAN"].map(est_ups).fillna("Sin cronograma")
             df["_est_ups"] = df["_SBAN"].map(est_ups).fillna("")
-            ups_fuente = "Cronograma UPS (respaldo: fecha + avance MT3)"
+            ups_fuente = "el cronograma de UPS (respaldo: fecha + avance)"
 
     df_mod = df[df["_componente"].eq(cod_mod)].copy()
     conteos = df["_componente"].value_counts().to_dict()
@@ -3192,7 +3203,7 @@ def main():
 
     nombres_tabs = ["📈 Gráficos y avance", "🏢 Resumen por oficina"]
     if cod_mod == "UPS":
-        nombres_tabs.append("🔋 Avance UPS (col AP)")
+        nombres_tabs.append("🔋 UPS: avance y diferencias")
     nombres_tabs += ["📰 Novedades de las oficinas", "📋 Gestión de novedades"]
     tabs = st.tabs(nombres_tabs)
     tab_graf, tab_res = tabs[0], tabs[1]

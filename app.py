@@ -2382,35 +2382,24 @@ def _texto_contraste(escala, frac):
     return "#0A0E14" if lum > 0.55 else "#FFFFFF"
 
 
-def _hm_total(pendientes, total) -> str:
-    """Texto de las celdas TOTAL del mapa de calor: pendientes y % de avance."""
-    p, t_ = int(pendientes), int(total)
-    av = ((t_ - p) / t_ * 100) if t_ else 0.0
-    return f"{p:,} pend. · {av:.0f} %".replace(",", ".")
+def grafico_heatmap(datos: pd.DataFrame, metrica: str = "avance"):
+    """Mapa de calor Regional × Estado de la sede. Simple y sin texto encimado.
 
+    Reglas de dibujo (una sola línea por celda, siempre):
 
-def grafico_heatmap(datos: pd.DataFrame, metrica: str = "avance",
-                    incluir_sin_regional: bool = True):
-    """Mapa de calor Regional × Estado de la sede, con TODA celda explicada.
-
-    - **Métrica conmutable**: `metrica="avance"` colorea por **% de avance** (escala 0-100),
-      así una regional grande no aplasta el color de las demás; `metrica="pendientes"`
-      colorea por el **conteo de pendientes** (vista de volumen).
-    - **Toda celda dice algo**: el número grande es la métrica elegida y debajo va el otro
-      dato. Donde no hay equipos se dibuja `—` y donde ya está todo hecho `✓ 100 %`; antes
-      esas dos situaciones se veían igual (espacio en blanco) y el tooltip mostraba ceros
-      que parecían "sin avance".
-    - **Totales de fila y columna** (`TOTAL`, pendientes y % de avance) dibujados aparte para
-      que no distorsionen la escala de color.
-    - Las filas **SIN REGIONAL** (bodegas y stock) se pueden incluir o excluir: son un cajón
-      de sastre que domina la escala.
-    - Los estados sin equipos en ninguna regional se eliminan del eje.
-
-    Devuelve `(figura, nota)`; `nota` es un texto para mostrar debajo (o None).
+    - **El color no cambia de significado**: siempre representa el **avance** (verde = está
+      hecho, naranja = falta). Así el mapa se lee igual sin importar el modo elegido.
+    - La **columna TOTAL** se calcula como el estado de cada oficina que va **más atrasado**
+      (si una oficina tiene equipos en «Programada» y «En proceso», cuenta como Programada),
+      y se colorea con la misma escala de avance. No se dibuja nada por fuera de la matriz.
+    - `metrica="avance"`: cada celda muestra su **% de avance** (las de 0 equipos muestran
+      «—» y las terminadas «✓»).
+    - `metrica="pendientes"`: cada celda muestra **cuántos equipos faltan**, con el mismo
+      color de avance, para ubicar de un vistazo los cruces más atrasados.
     """
     t = tema_actual()
     if "Regional" not in datos.columns or "_est_crono" not in datos.columns:
-        return None, None
+        return None
     d = datos.copy()
     d["_est"] = (d["_est_crono"].astype(str)
                  .str.replace(r"^[^A-Za-zÁÉÍÓÚáéíóúñ]+", "", regex=True).str.strip())
@@ -2419,126 +2408,78 @@ def grafico_heatmap(datos: pd.DataFrame, metrica: str = "avance",
     d["_reg"] = reg.where(~reg.isin(["", "nan", "None"]), "SIN REGIONAL")
     d["_mt_int"] = d["_mt"].astype(int)
 
-    # Las filas SIN REGIONAL (bodegas/stock) se pueden dejar fuera del mapa.
-    nota = None
-    if not incluir_sin_regional:
-        sr = d[d["_reg"].eq("SIN REGIONAL")]
-        if len(sr):
-            n_eq = int(len(sr))
-            n_pen = int(sr["_pendiente"].sum())
-            av_sr = (int(sr["_mt"].sum()) / n_eq * 100) if n_eq else 0.0
-            nota = (f"Fuera del mapa: **{n_eq:,} equipos de bodega/stock sin regional** "
-                    f"(«SIN REGIONAL») → {n_pen:,} pendientes · {av_sr:.0f} % de avance."
-                    .replace(",", "."))
-            d = d[~d["_reg"].eq("SIN REGIONAL")]
-
     orden = ["Programada", "En proceso", "Finalizada", "Reprogramada",
              "Reprogramada_Finalizada", "Sin cronograma"]
     presentes = set(d["_est"])
     cols = ([c for c in orden if c in presentes]
             + [c for c in sorted(presentes) if c not in orden])
-    # Estados sin ningún equipo: fuera del eje (no aportan nada al mapa).
     cols = [c for c in cols if int(d["_est"].eq(c).sum()) > 0]
     if not cols or d.empty:
-        return None, nota
+        return None
 
-    def _piv(valores, agg):
-        p = d.pivot_table(index="_reg", columns="_est", values=valores,
-                          aggfunc=agg, fill_value=0).reindex(columns=cols, fill_value=0)
+    def _matriz(base, valores, agg):
+        p = base.pivot_table(index="_reg", columns="_est", values=valores,
+                             aggfunc=agg, fill_value=0).reindex(columns=cols, fill_value=0)
         p["TOTAL"] = p.sum(axis=1)
         p.loc["TOTAL"] = p.sum(axis=0)
         return p
 
-    p_pend = _piv("_pendiente", "sum")
-    p_tot = _piv("_pendiente", "size")
-    p_mt = _piv("_mt_int", "sum")
-    p_av = (p_mt / p_tot * 100).where(p_tot > 0, 0.0)
+    pend = _matriz(d, "_pendiente", "sum")
+    tot = _matriz(d, "_pendiente", "size")
+    mt = _matriz(d, "_mt_int", "sum")
+    avance = np.nan_to_num((mt / tot * 100).where(tot > 0, 0.0).values, nan=0.0)
 
-    # Cuerpo (sin fila/columna TOTAL) y totales, que se dibujan aparte
-    pend = p_pend.iloc[:-1, :-1]
-    tot = p_tot.iloc[:-1, :-1]
-    av = p_av.iloc[:-1, :-1]
-    pend_t, tot_t = p_pend["TOTAL"], p_tot["TOTAL"]          # por regional
-    pend_c, tot_c = p_pend.loc["TOTAL"], p_tot.loc["TOTAL"]  # por estado
     filas = list(pend.index)
-
-    z = np.nan_to_num((av if metrica == "avance" else pend).values.astype(float), nan=0.0)
-    # La escala de color NO incluye los totales: aplastarían el contraste.
-    zmax = float(z.max()) if z.size else 0.0
-    zmax = zmax if zmax > 0 else (100.0 if metrica == "avance" else 1.0)
-
+    # El color SIEMPRE es el avance (misma lectura en los dos modos).
     fig = go.Figure(go.Heatmap(
-        z=z, x=cols, y=filas,
-        zmin=0, zmax=zmax, colorscale=t["heat"], xgap=3, ygap=3,
-        colorbar=dict(title=dict(text="Avance %" if metrica == "avance" else "Pendientes",
-                                 font=dict(color=t["ink"])),
+        z=avance, x=list(pend.columns), y=filas,
+        zmin=0, zmax=100, colorscale=t["heat"], xgap=3, ygap=3,
+        colorbar=dict(title=dict(text="Avance %", font=dict(color=t["ink"])),
                       tickfont=dict(color=t["muted"])),
-        customdata=[[(["sin equipos en este cruce", "0", "—"]
-                      if int(tot.values[i][j]) == 0 else
-                      [f"{int(pend.values[i][j]):,}".replace(",", "."),
-                       f"{int(tot.values[i][j]):,}".replace(",", "."),
-                       f"{av.values[i][j]:.0f} %"])
-                     for j in range(len(cols))]
-                    for i in range(len(filas))],
-        hovertemplate=("<b>%{y}</b> · %{x}<br>Total de equipos: %{customdata[1]}<br>"
-                       "Pendientes: %{customdata[0]}<br>Avance MT3: %{customdata[2]}"
+        hovertemplate=("<b>%{y}</b> · %{x}<br>Avance MT3: %{z:.0f} %<br>"
+                       "Pendientes: %{customdata[0]}<br>Equipos: %{customdata[1]}"
                        "<extra></extra>"),
+        customdata=[[["—", 0] if int(tot.values[i][j]) == 0
+                     else [f"{int(pend.values[i][j]):,}".replace(",", "."),
+                           f"{int(tot.values[i][j]):,}".replace(",", ".")]
+                     for j in range(len(pend.columns))]
+                    for i in range(len(filas))],
     ))
 
-    # --- Toda celda dice algo (antes las de 0 quedaban mudas) ---
-    for i, reg_n in enumerate(filas):
-        for j, est in enumerate(cols):
-            t_c = int(tot.values[i][j])
-            p_c = int(pend.values[i][j])
-            a_c = float(av.values[i][j])
-            if t_c == 0:                                  # no existe el cruce
+    # Una sola linea por celda: el numero que pidio el usuario (o «—» / «✓»).
+    for i in range(len(filas)):
+        for j, est in enumerate(pend.columns):
+            tot_c = int(tot.values[i][j])
+            pend_c = int(pend.values[i][j])
+            av_c = float(avance[i][j])
+            if tot_c == 0:
                 texto, color = "—", t["muted"]
-            elif p_c == 0:                                # existe y está completo
-                texto, color = "✓ 100 %", t["verde"]
+            elif metrica == "pendientes":
+                texto = "✓" if pend_c == 0 else f"{pend_c:,}".replace(",", ".")
+                color = _texto_contraste(t["heat"], av_c / 100.0)
             else:
-                if metrica == "avance":
-                    principal = f"<b>{a_c:.0f} %</b>"
-                    secundario = f"{p_c:,}".replace(",", ".") + " pend."
-                    frac = a_c / 100.0
-                else:
-                    principal = "<b>" + f"{p_c:,}".replace(",", ".") + "</b>"
-                    secundario = f"{a_c:.0f} % av."
-                    frac = p_c / zmax
-                texto = f"{principal}<br><span style='font-size:9px'>{secundario}</span>"
-                color = _texto_contraste(t["heat"], frac)
-            fig.add_annotation(x=est, y=reg_n, text=texto, showarrow=False,
-                               xref="x", yref="y", font=dict(size=11, color=color))
+                texto = "✓" if pend_c == 0 else f"{av_c:.0f} %"
+                color = _texto_contraste(t["heat"], av_c / 100.0)
+            fig.add_annotation(x=est, y=filas[i], text=texto, showarrow=False,
+                               xref="x", yref="y", font=dict(size=12, color=color))
 
-    # --- Totales de fila, columna y esquina (fuera de la escala de color) ---
-    def _marco(x, y, p, t_):
-        fig.add_annotation(
-            x=x, y=y, text=f"<b>{_hm_total(p, t_)}</b>", showarrow=False,
-            xref="x", yref="y", font=dict(size=10, color=t["ink"]),
-            bgcolor=t["card"], borderpad=2, bordercolor=t["border"], borderwidth=1)
-
-    for reg_n in filas:
-        _marco("TOTAL", reg_n, pend_t.loc[reg_n], tot_t.loc[reg_n])
-    for est in cols:
-        _marco(est, "TOTAL", pend_c.loc[est], tot_c.loc[est])
-    _marco("TOTAL", "TOTAL", pend.values.sum(), tot.values.sum())
-
-    como = ("color = qué tan completo está cada cruce (% de avance)"
-            if metrica == "avance" else
-            "color = cuántos equipos faltan en cada cruce (pendientes)")
+    filas_body = max(1, len(filas) - 1)          # sin contar la fila TOTAL
+    modo = ("porcentaje de avance" if metrica == "avance"
+            else "cuántos equipos faltan")
     fig.update_layout(
-        title=dict(text="<b>Mapa de calor: pendientes por Regional y Estado de la sede</b>"
-                        f"<br><span style='font-size:11px'>{como} · el número grande es la "
-                        "métrica elegida y debajo va el otro dato · «—» = sin equipos · "
-                        "«✓ 100 %» = todo hecho · la fila y columna TOTAL no entran en el "
-                        "color.</span>",
+        title=dict(text="<b>Mapa de calor: avance por Regional y Estado de la sede</b>"
+                        f"<br><span style='font-size:11px'>Color = avance MT3 (verde está "
+                        f"hecho, naranja falta). Números = {modo}. "
+                        "«—» sin equipos · «✓» completo · la columna TOTAL usa el estado "
+                        "más atrasado de cada oficina.</span>",
                    font=dict(size=15, color=t["ink"]), x=0.02),
-        height=max(370, 44 * len(filas) + 150),
-        margin=dict(l=10, r=10, t=70, b=10),
-        xaxis=dict(title="", color=t["muted"], side="bottom"),
+        height=max(300, 38 * filas_body + 150),
+        margin=dict(l=110, r=80, t=100, b=50),
+        xaxis=dict(title="", color=t["muted"], side="bottom", tickangle=0),
         yaxis=dict(title="", autorange="reversed", color=t["muted"]),
         **plotly_base(),
     )
-    return fig, nota
+    return fig
 
 
 def grafico_top_pendientes(datos: pd.DataFrame, top_n: int = 12):
@@ -3336,33 +3277,20 @@ def main():
             else:
                 st.info("Sin fechas de MT3 para la selección actual.")
 
-        # --- Mapa de calor: control de métrica y de la fila SIN REGIONAL ---
+        # --- Mapa de calor: un único control (el color siempre es el avance) ---
         st.markdown("---")
-        hm1, hm2, hm3 = st.columns([1.5, 1.2, 2.3], vertical_alignment="center")
-        with hm1:
-            hm_metrica = st.segmented_control(
-                "Mapa de calor: qué mostrar", ["Avance %", "Pendientes"],
-                default="Avance %", key="hm_metrica",
-                help="«Avance %» colorea cada cruce por qué tan completo está (escala 0-100). "
-                     "«Pendientes» colorea por cuántos equipos faltan (vista de volumen).") \
-                or "Avance %"
-        with hm2:
-            hm_sin_reg = st.checkbox(
-                "Incluir «SIN REGIONAL»", value=True, key="hm_sin_reg",
-                help="Bodegas y stock sin regional asignada. Es un cajón de sastre: al incluirlo "
-                     "suele dominar la escala de color del mapa.")
-        with hm3:
-            st.caption("💡 El número grande es la métrica elegida y debajo va el otro dato. "
-                       "«—» = sin equipos en ese cruce · «✓ 100 %» = todo hecho. "
-                       "La fila y columna **TOTAL** no entran en la escala de color.")
-        fig_h, nota_h = grafico_heatmap(
-            filtrado,
-            metrica=("avance" if hm_metrica == "Avance %" else "pendientes"),
-            incluir_sin_regional=bool(hm_sin_reg))
+        hm_metrica = st.segmented_control(
+            "Mapa de calor: qué número mostrar", ["Avance %", "Pendientes"],
+            default="Avance %", key="hm_metrica",
+            help="El color siempre significa lo mismo (avance MT3: verde = hecho, "
+                 "naranja = falta). Aquí eliges qué número va escrito en cada celda.") \
+            or "Avance %"
+        fig_h = grafico_heatmap(
+            filtrado, metrica=("avance" if hm_metrica == "Avance %" else "pendientes"))
         if fig_h is not None:
             st.plotly_chart(fig_h, width="stretch", config=cfg_chart)
-            if nota_h:
-                st.caption("ℹ️ " + nota_h)
+            st.caption("Pasa el mouse por una celda para ver avance, pendientes y total de "
+                       "equipos. **«—»** = ese cruce no tiene equipos · **«✓»** = está completo.")
         else:
             st.info("Sin datos de Regional/Estado para el mapa de calor con los filtros actuales.")
 

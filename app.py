@@ -6,6 +6,7 @@ App Streamlit de un solo archivo. Fuente: Data_PCTriage.xlsx (hoja 'Hoja1').
 import hashlib
 import io
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -407,6 +408,7 @@ def barra_facturacion(df_mod: pd.DataFrame, mostrar_conteos: bool = True):
 VALORES_FILTRO = {
     # valor por defecto de cada filtro (clave de session_state)
     "f_oficinas": [],
+    "f_jefaturas": [],
     "f_solo_pend": False,
     "f_atrib": "Todos",
     "click_sban": None,
@@ -417,6 +419,87 @@ VALORES_FILTRO = {
     "res_solo_pend": False,
     "res_solo_nov": False,
 }
+
+
+def tabla_jefaturas(df: pd.DataFrame, kpi=None) -> pd.DataFrame:
+    """Avance por JEFATURA: equipos, mantenimientos hechos, pendientes y % de avance.
+
+    Las jefaturas se identifican en la columna AA («Oficina») por el patrón
+    «NNNNN-NOMBRE». El nombre se deja TAL CUAL viene en el archivo; el prefijo de
+    5 dígitos solo se usa para ubicar la regional de la que depende.
+    """
+    vacio = pd.DataFrame(columns=["Jefatura", "Sede (columna AA)", "Regional (SBAN)",
+                                  "Regional", "Equipos", "Realizados", "Pendientes",
+                                  "Avance %", "Reportado (Campos)"])
+    if df is None or getattr(df, "empty", True) or "_jefatura" not in df.columns:
+        return vacio
+    j = df[df["_jefatura"].astype(str).str.strip().ne("")].copy()
+    if j.empty:
+        return vacio
+    g = (j.groupby("_jefatura")
+         .agg(**{"Sede (columna AA)": ("Oficina", "first"),
+                 "Regional (SBAN)": ("_jefatura_reg", "first"),
+                 "Regional": ("Regional", lambda s: s.mode().iloc[0] if len(s) else ""),
+                 "Equipos": ("Serial", "size"),
+                 "Realizados": ("_mt", "sum")})
+         .reset_index().rename(columns={"_jefatura": "Jefatura"}))
+    g["Pendientes"] = g["Equipos"] - g["Realizados"]
+    g["Avance %"] = (g["Realizados"] / g["Equipos"] * 100).where(g["Equipos"] > 0, 0.0).round(1)
+    # Estado reportado por la oficina para esa jefatura (Campos dashboard), si existe.
+    reportado = ""
+    if kpi is not None and not getattr(kpi, "empty", True):
+        c_sb, c_est = _col(kpi, "SBAN"), _col(kpi, "Estado de la sede")
+        if c_sb and c_est:
+            kk = kpi.copy()
+            kk["_SBAN"] = kk[c_sb].apply(_pad5)
+            mapa = (kk.drop_duplicates("_SBAN", keep="first")
+                    .set_index("_SBAN")[c_est].fillna("").astype(str).str.strip().to_dict())
+            reportado = g["Regional (SBAN)"].map(mapa).fillna("")
+    g["Reportado (Campos)"] = reportado if isinstance(reportado, pd.Series) else ""
+    return g.sort_values(["Pendientes", "Jefatura"], ascending=[False, True]).reset_index(drop=True)
+
+
+def render_jefaturas(df: pd.DataFrame, kpi=None):
+    """Bloque de avance por jefatura, dentro del Resumen por oficina."""
+    t = tabla_jefaturas(df, kpi)
+    st.markdown("#### 🏛️ Avance por jefatura")
+    if t.empty:
+        st.info("Este archivo no trae filas de jefatura (columna AA con formato «01300- MEDELLIN»). "
+                "Aparecerán aquí en cuanto el archivo las incluya.")
+        return
+    hechas = int((t["Pendientes"] <= 0).sum())
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🏛️ Jefaturas identificadas", f"{len(t)}", border=True,
+              help="Filas de la columna AA con el patrón «NNNNN-NOMBRE». El archivo manda: "
+                   "no se renombra ninguna.")
+    c2.metric("✅ Jefaturas completas", f"{hechas} de {len(t)}", border=True,
+              help="Jefaturas cuyo mantenimiento está hecho en todos sus equipos.")
+    c3.metric("⚠️ Equipos pendientes en jefaturas",
+              f"{int(t['Pendientes'].sum()):,}".replace(",", "."), border=True,
+              help="Suma de pendientes de las jefaturas (no incluye sus oficinas).")
+
+    st.dataframe(
+        t, hide_index=True, width="stretch", height=min(460, 40 + 35 * len(t)),
+        column_config={
+            "Jefatura": st.column_config.TextColumn("Jefatura", width="medium"),
+            "Sede (columna AA)": st.column_config.TextColumn(
+                "Sede (columna AA)", width="medium",
+                help="Así viene escrita la jefatura en el archivo, sin cambios."),
+            "Regional (SBAN)": st.column_config.TextColumn("Regional (SBAN)", width="small"),
+            "Regional": st.column_config.TextColumn("Regional", width="small"),
+            "Equipos": st.column_config.NumberColumn("Equipos", format="%d", width="small"),
+            "Realizados": st.column_config.NumberColumn("Realizados", format="%d", width="small"),
+            "Pendientes": st.column_config.NumberColumn("Pendientes", format="%d", width="small"),
+            "Avance %": st.column_config.ProgressColumn(
+                "Avance %", min_value=0, max_value=100, format="%.0f%%", width="small"),
+            "Reportado (Campos)": st.column_config.TextColumn(
+                "Reportado (Campos)", width="small",
+                help="Estado que esa sede reportó en el archivo Campos dashboard."),
+        },
+    )
+    st.caption("Solo equipos propios de cada jefatura (las oficinas que dependen de ellas "
+               "se ven en la tabla de abajo). El archivo manda: los nombres son los de la "
+               "columna AA.")
 
 
 def _quitar_filtro(clave: str):
@@ -456,9 +539,15 @@ def _limpiar_filtros_resumen():
             st.session_state[clave] = valor
 
 
-def barra_filtros_activos(seleccion, solo_pendientes, f_attr, click_sban):
+def barra_filtros_activos(seleccion, solo_pendientes, f_attr, click_sban, seleccion_jef=None):
     """Chips de filtros activos, cada uno con botón para quitarlo de un toque."""
     activos = []
+    if seleccion_jef:
+        if len(seleccion_jef) == 1:
+            txt_j = "🏛️ " + str(seleccion_jef[0])[:24]
+        else:
+            txt_j = f"🏛️ {len(seleccion_jef)} jefaturas"
+        activos.append((txt_j, "f_jefaturas"))
     if seleccion:
         if len(seleccion) == 1:
             txt = seleccion[0][:26] + ("…" if len(seleccion[0]) > 26 else "")
@@ -730,6 +819,56 @@ COLUMNAS_TECNICO = [
 # ----------------------------------------------------------------------------
 # Carga y preparación de datos (con caché)
 # ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Jefaturas: en la columna AA («Oficina») las jefaturas vienen escritas como
+# «NNNNN-NOMBRE» (5 dígitos + guion + nombre). Todo lo demás es una oficina
+# normal (solo SBAN numérico). El prefijo de 5 dígitos es la regional de la que
+# depende la jefatura.
+# ----------------------------------------------------------------------------
+PATRON_JEFATURA = re.compile(r"^\s*(\d{5})\s*-\s*(.+?)\s*$")
+
+
+def jefatura_de(oficina) -> str:
+    """Devuelve el nombre de la jefatura si la oficina es una jefatura, si no ''.
+
+    Ejemplos (el archivo manda, no se renombra nada):
+        '01300- MEDELLIN'  -> 'MEDELLIN'
+        '01600- BQUILLA'   -> 'BQUILLA'
+        '01800-MANIZALES'  -> 'MANIZALES'
+        'FUNZA'            -> ''   (oficina normal)
+    """
+    m = PATRON_JEFATURA.match(str(oficina or ""))
+    return m.group(2).strip() if m else ""
+
+
+def regional_de_jefatura(oficina) -> str:
+    """Código SBAN de la regional a la que pertenece la jefatura ('' si no es jefatura)."""
+    m = PATRON_JEFATURA.match(str(oficina or ""))
+    return m.group(1) if m else ""
+
+
+def es_jefatura(oficina) -> bool:
+    """True si el nombre trae números Y letras en el patrón de jefatura."""
+    return PATRON_JEFATURA.match(str(oficina or "")) is not None
+
+
+def codigo_de(valor) -> str:
+    """Código SBAN de 5 dígitos.
+
+    Tolera los dos formatos que trae el archivo en la columna AA (SBAN):
+      - oficina normal: '1500', '1500.0'  -> '01500'
+      - jefatura:       '01300- MONTERIA' -> '01300'   (se toma el prefijo)
+    Así las jefaturas siguen contando dentro de su regional y el panel no falla.
+    """
+    m = PATRON_JEFATURA.match(str(valor or ""))
+    if m:
+        return m.group(1)
+    try:
+        return str(int(float(valor))).zfill(5)
+    except (ValueError, TypeError):
+        return str(valor).strip() if pd.notna(valor) and str(valor) != "nan" else ""
+
+
 @st.cache_data(show_spinner="Leyendo Data_PCTriage.xlsx…")
 def _cargar_y_preparar(path: str, mtime: float) -> pd.DataFrame:
     """Lee la hoja Hoja1 y normaliza el dataframe. mtime invalida la caché si el archivo cambia."""
@@ -755,14 +894,18 @@ def _cargar_y_preparar(path: str, mtime: float) -> pd.DataFrame:
         lambda v: _formato_placa(v) if pd.notna(v) else ""
     ).astype(str)
 
-    # --- SBAN: código de oficina (visible y buscable, formato 5 dígitos) ---
-    def _sban5(v):
-        try:
-            return str(int(float(v))).zfill(5)
-        except (ValueError, TypeError):
-            return str(v) if pd.notna(v) and str(v) != "nan" else ""
+    # --- Jefatura: en el archivo viene escrita en la columna AA («SBAN» u «Oficina»)
+    #     con el patrón «NNNNN-NOMBRE» (5 dígitos + guion + nombre). ---
+    df["_jefatura"] = df["Oficina"].apply(jefatura_de)
+    df["_jefatura_reg"] = df["Oficina"].apply(regional_de_jefatura)
+    df["_es_jefatura"] = df["_jefatura"].ne("")
+    df["_nivel"] = np.where(df["_es_jefatura"], "Jefatura", "Oficina")
 
-    df["_SBAN"] = df["SBAN"].apply(_sban5)
+    # --- SBAN: código de oficina (visible y buscable, formato 5 dígitos).
+    #     Para las jefaturas toma el prefijo, así no se pierden de su regional. ---
+    df["_SBAN"] = df["SBAN"].apply(codigo_de)
+    # Respaldo: si el SBAN quedó vacío pero la fila es jefatura, se usa el prefijo.
+    df.loc[df["_SBAN"].eq("") & df["_es_jefatura"], "_SBAN"] = df["_jefatura_reg"]
     df["_ofi_key"] = df["_SBAN"] + " - " + df["Oficina"]
 
     # --- Lógica MT3: mantenimiento realizado solo si el consecutivo empieza por "MT" ---
@@ -905,10 +1048,12 @@ def cargar_campos():
 
 
 def _pad5(v):
-    try:
-        return str(int(float(v))).zfill(5)
-    except (ValueError, TypeError):
-        return ""
+    """Código de 5 dígitos. Tolera el formato de jefatura («01300- MONTERIA» -> «01300»).
+
+    Antes lanzaba ValueError con esos valores, y como en el archivo las jefaturas
+    vienen escritas así en la columna de SBAN, el panel se caía al cruzar estados.
+    """
+    return codigo_de(v)
 
 
 def _col(df, *nombres):
@@ -1796,6 +1941,26 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
         if not opciones:
             st.warning("Este módulo no tiene oficinas con datos.")
 
+        # --- Jefaturas: en la columna AA vienen como «NNNNN-NOMBRE» ---
+        opciones_jef = sorted(
+            base_mod.loc[base_mod["_es_jefatura"], "_jefatura"].dropna().unique().tolist()) \
+            if "_jefatura" in base_mod.columns else []
+        st.session_state["f_jefaturas"] = [
+            j for j in st.session_state.get("f_jefaturas", []) if j in opciones_jef]
+        seleccion_jef = st.multiselect(
+            "Jefatura",
+            options=opciones_jef,
+            key="f_jefaturas",
+            placeholder="Todas las jefaturas",
+            help="Jefaturas identificadas en la columna AA del archivo (formato «01300- MEDELLIN»). "
+                 "Filtra el tablero a los equipos de esas jefaturas.",
+            disabled=not opciones_jef,
+        )
+        if opciones_jef:
+            st.caption(f"🏛️ {len(opciones_jef)} jefaturas identificadas en el archivo.")
+        else:
+            st.caption("🏛️ Este módulo no tiene filas de jefatura.")
+
         solo_pendientes = st.checkbox(
             "Mostrar solo pendientes ⚠️",
             key="f_solo_pend",
@@ -1839,7 +2004,7 @@ def render_sidebar(df: pd.DataFrame, cod_mod: str = "C1"):
                         st.download_button("⬇️ Bitácora de cargas (CSV)", data=fh.read(),
                                            file_name="bitacora_cargas.csv", mime="text/csv",
                                            width="stretch")
-        return seleccion, solo_pendientes, f_attr
+        return seleccion, solo_pendientes, f_attr, seleccion_jef
 
 
 # ----------------------------------------------------------------------------
@@ -3083,7 +3248,7 @@ def main():
     cod_mod = {"Componente 1": "C1", "Componente 2 (Impresoras láser)": "C2",
                "UPS": "UPS"}[modulo]
 
-    seleccion, solo_pendientes, f_attr = render_sidebar(df, cod_mod)
+    seleccion, solo_pendientes, f_attr, seleccion_jef = render_sidebar(df, cod_mod)
 
     # UPS: el avance por sede viene de la columna AP «ESTADO UPS» del archivo Campos
     # dashboard (Banco Agrario + COLSOF en el mismo documento). Solo si ese archivo no
@@ -3123,8 +3288,10 @@ def main():
 
     nov_resumen = _novedades_de(cod_mod)
 
-    # --- Filtrado dinámico: oficina → atribución (Facturable) → solo pendientes ---
+    # --- Filtrado dinámico: jefatura → oficina → atribución → solo pendientes ---
     mascara_office = pd.Series(True, index=df_mod.index)
+    if seleccion_jef and "_es_jefatura" in df_mod.columns:
+        mascara_office &= df_mod["_es_jefatura"] & df_mod["_jefatura"].isin(seleccion_jef)
     if seleccion:
         mascara_office &= df_mod["_ofi_key"].isin(seleccion)
     base_oficina = df_mod[mascara_office]
@@ -3222,7 +3389,7 @@ def main():
 
     # --- Filtros activos (chips con X) ---
     barra_filtros_activos(seleccion, solo_pendientes, f_attr,
-                          st.session_state.get("click_sban"))
+                          st.session_state.get("click_sban"), seleccion_jef)
 
     # --- Pestañas: Gráficos · Resumen por oficina · Avance UPS · Novedades · Gestión ---
     cfg_chart = {"displaylogo": False,
@@ -3301,6 +3468,9 @@ def main():
             st.info("Sin datos de Regional/Estado para el mapa de calor con los filtros actuales.")
 
     with tab_res:
+        # Avance por JEFATURA (columna AA) y luego el resumen por oficina
+        render_jefaturas(df, kpi_campos)
+        st.markdown("---")
         # Resumen por oficina (Total / Subsanados / Pendientes / % Avance / Novedades)
         render_resumen(base_oficina, seleccion, f_attr, nov_resumen)
 

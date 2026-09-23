@@ -21,6 +21,7 @@ ORIGEN = BASE.parent
 
 ARCHIVOS = {
     "app.py": "app.py",
+    "requirements.txt": "requirements.txt",
     "README.md": "README.md",
     "TUTORIAL.md": "TUTORIAL.md",
 }

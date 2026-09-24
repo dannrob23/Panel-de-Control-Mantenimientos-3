@@ -2882,199 +2882,205 @@ def render_resumen(base: pd.DataFrame, seleccion: list, tipo: str = "T", nov_res
     """
     etiqueta = {"T": "Todos", "Si": "BANCO (Facturables Si)", "No": "COLSOF (No facturables)"}.get(tipo, "Todos")
     st.markdown("---")
-    with st.expander(
-        "📊 Resumen por oficina: Total de elementos · Subsanados · Pendientes",
-        expanded=bool(seleccion),
-    ):
+    # --- Sección siempre visible (Opción A: sin expander) ---
+    st.markdown("#### 🏢 Resumen por oficina")
+    st.caption("Una fila por oficina (SBAN). Los filtros de **este bloque** son independientes de los KPIs de arriba.")
+
+    if base.empty:
+        st.info("Sin oficinas para los filtros seleccionados.")
+        return
+    if tipo in ("Si", "No"):
+        base = base[base["Facturable"] == tipo]
         if base.empty:
-            st.info("Sin oficinas para los filtros seleccionados.")
+            st.info(f"No hay elementos **{etiqueta}** en las oficinas seleccionadas.")
             return
-        if tipo in ("Si", "No"):
-            base = base[base["Facturable"] == tipo]
-            if base.empty:
-                st.info(f"No hay elementos **{etiqueta}** en las oficinas seleccionadas.")
-                return
-        nov_lookup = {}
-        if nov_res is not None and not nov_res.empty and "_SBAN" in nov_res.columns:
-            def _n0(v):
-                try:
-                    return 0 if pd.isna(v) else int(v)
-                except (TypeError, ValueError):
-                    return 0
-            for _, nr in nov_res.iterrows():
-                nov_lookup[str(nr["_SBAN"])] = (
-                    str(nr.get("Categoría Novedad", "") or "").strip(),
-                    _n0(nr.get("Novedades del día", 0)),
-                    _n0(nr.get("Novedades acumuladas", 0)),
-                    str(nr.get("Obs. novedad", "") or "").strip(),
-                )
-        filas = []
-        for key, sub in base.groupby("_SBAN", sort=True):
-            total = len(sub)
-            subsanados = int(sub["_mt"].sum())
-            pendientes = total - subsanados
-            avance = (subsanados / total * 100) if total else 0.0
-            estados = sorted({str(x) for x in sub["_est_crono"].dropna().tolist() if str(x).strip()})
-            sban_ofi = str(sub["_SBAN"].iloc[0])
-            nombres_ofi = [str(x).strip() for x in dict.fromkeys(sub["Oficina"].dropna())
-                           if str(x).strip()]
-            etiqueta_ofi = (" / ".join(nombres_ofi[:2])
-                            + (" …" if len(nombres_ofi) > 2 else "")) or "SIN NOMBRE"
-            cat_nov, n_dia, n_acum, obs_nov = nov_lookup.get(sban_ofi, ("", 0, 0, ""))
-            filas.append({
-                "SBAN": sban_ofi,
-                "Oficina": etiqueta_ofi,
-                "Estado": _badge_estado(" / ".join(estados) if estados else "Sin cronograma"),
-                "Estado cronograma": " / ".join(estados) if estados else "Sin cronograma",
-                "Total elementos": total,
-                "Subsanados (MT)": subsanados,
-                "Pendientes": pendientes,
-                "% Avance": round(avance, 1),
-                "Categoría Novedad": ("🟠 " + cat_nov) if cat_nov else "—",
-                "Novedades del día": n_dia,
-                "Novedades acumuladas": n_acum,
-                "Obs. novedad": "" if MODO_PUBLICO else obs_nov,
-            })
-        res = pd.DataFrame(filas)
-        datos_resumen = res.copy()  # sin fila TOTAL
 
-        # ---------------- Filtros intuitivos de la vista ----------------
-        # Valores por defecto ANTES de crear los widgets: así el slider siempre tiene
-        # un valor definido y el reinicio por callback no choca con su instanciación.
-        for _k, _v in VALORES_FILTRO.items():
-            if _k.startswith("res_") and _v is not None:
-                st.session_state.setdefault(_k, _v)
-        estados_posibles = ["Programada", "En proceso", "Finalizada", "Reprogramada",
-                            "Reprogramada_Finalizada", "Sin cronograma"]
-        tokens = {tok.strip() for v in datos_resumen["Estado cronograma"]
-                  for tok in str(v).split("/") if tok.strip()}
-        presentes = ([e for e in estados_posibles if e in tokens]
-                     + [e for e in sorted(tokens) if e not in estados_posibles])
-        f1, f2, f3 = st.columns([2.2, 1.6, 1])
-        with f1:
-            sel_est = st.multiselect("🗂️ Estado cronograma", options=presentes, default=presentes,
-                                     key="res_estado", placeholder="Todos los estados")
-        with f2:
-            min_av = st.slider("🎯 Avance mínimo (%)", 0, 100, step=5,
-                               key="res_min_av", help="Muestra oficinas con avance igual o mayor")
-        with f3:
-            solo_pend = st.checkbox("Solo pendientes\n(< 100%)", key="res_solo_pend")
+    # Vista previa SIEMPRE visible (antes vivía al final, dentro del expander).
+    _n_vis0 = int(base["_SBAN"].nunique())
+    _nd0 = (int(pd.to_numeric(base["Novedades del día"], errors="coerce").fillna(0).sum())
+            if "Novedades del día" in base.columns else 0)
+    _na0 = (int(pd.to_numeric(base["Novedades acumuladas"], errors="coerce").fillna(0).sum())
+            if "Novedades acumuladas" in base.columns else 0)
+    _k1, _k2, _k3 = st.columns(3)
+    _k1.metric("🏢 Oficinas en el resumen", f"{_n_vis0:,}".replace(",", "."), border=True,
+               help="Oficinas (una por SBAN) que entran con los filtros del sidebar.")
+    _k2.metric("🏷️ Novedades del día", f"{_nd0:,}".replace(",", "."), border=True,
+               help="Novedades de las oficinas con la fecha más reciente del archivo.")
+    _k3.metric("📚 Novedades acumuladas", f"{_na0:,}".replace(",", "."), border=True,
+               help="Total histórico de novedades de esas oficinas.")
 
-        vis = datos_resumen.copy()
-        vis["% Avance"] = pd.to_numeric(vis["% Avance"], errors="coerce").fillna(0)
-        if sel_est:
-            vis = vis[vis["Estado cronograma"].apply(
-                lambda e: any(t.strip() in sel_est for t in str(e).split("/")))]
-        vis = vis[vis["% Avance"] >= min_av]
-        if solo_pend:
-            vis = vis[vis["% Avance"] < 100.0]
+    nov_lookup = {}
+    if nov_res is not None and not nov_res.empty and "_SBAN" in nov_res.columns:
+        def _n0(v):
+            try:
+                return 0 if pd.isna(v) else int(v)
+            except (TypeError, ValueError):
+                return 0
+        for _, nr in nov_res.iterrows():
+            nov_lookup[str(nr["_SBAN"])] = (
+                str(nr.get("Categoría Novedad", "") or "").strip(),
+                _n0(nr.get("Novedades del día", 0)),
+                _n0(nr.get("Novedades acumuladas", 0)),
+                str(nr.get("Obs. novedad", "") or "").strip(),
+            )
+    filas = []
+    for key, sub in base.groupby("_SBAN", sort=True):
+        total = len(sub)
+        subsanados = int(sub["_mt"].sum())
+        pendientes = total - subsanados
+        avance = (subsanados / total * 100) if total else 0.0
+        estados = sorted({str(x) for x in sub["_est_crono"].dropna().tolist() if str(x).strip()})
+        sban_ofi = str(sub["_SBAN"].iloc[0])
+        nombres_ofi = [str(x).strip() for x in dict.fromkeys(sub["Oficina"].dropna())
+                       if str(x).strip()]
+        etiqueta_ofi = (" / ".join(nombres_ofi[:2])
+                        + (" …" if len(nombres_ofi) > 2 else "")) or "SIN NOMBRE"
+        cat_nov, n_dia, n_acum, obs_nov = nov_lookup.get(sban_ofi, ("", 0, 0, ""))
+        filas.append({
+            "SBAN": sban_ofi,
+            "Oficina": etiqueta_ofi,
+            "Estado": _badge_estado(" / ".join(estados) if estados else "Sin cronograma"),
+            "Estado cronograma": " / ".join(estados) if estados else "Sin cronograma",
+            "Total elementos": total,
+            "Subsanados (MT)": subsanados,
+            "Pendientes": pendientes,
+            "% Avance": round(avance, 1),
+            "Categoría Novedad": ("🟠 " + cat_nov) if cat_nov else "—",
+            "Novedades del día": n_dia,
+            "Novedades acumuladas": n_acum,
+            "Obs. novedad": "" if MODO_PUBLICO else obs_nov,
+        })
+    res = pd.DataFrame(filas)
+    datos_resumen = res.copy()  # sin fila TOTAL
+
+    # ---------------- Filtros intuitivos de la vista ----------------
+    # Valores por defecto ANTES de crear los widgets: así el slider siempre tiene
+    # un valor definido y el reinicio por callback no choca con su instanciación.
+    for _k, _v in VALORES_FILTRO.items():
+        if _k.startswith("res_") and _v is not None:
+            st.session_state.setdefault(_k, _v)
+    estados_posibles = ["Programada", "En proceso", "Finalizada", "Reprogramada",
+                        "Reprogramada_Finalizada", "Sin cronograma"]
+    tokens = {tok.strip() for v in datos_resumen["Estado cronograma"]
+              for tok in str(v).split("/") if tok.strip()}
+    presentes = ([e for e in estados_posibles if e in tokens]
+                 + [e for e in sorted(tokens) if e not in estados_posibles])
+    f1, f2, f3 = st.columns([2.2, 1.6, 1])
+    with f1:
+        sel_est = st.multiselect("🗂️ Estado cronograma", options=presentes, default=presentes,
+                                 key="res_estado", placeholder="Todos los estados")
+    with f2:
+        min_av = st.slider("🎯 Avance mínimo (%)", 0, 100, step=5,
+                           key="res_min_av", help="Muestra oficinas con avance igual o mayor")
+    with f3:
+        solo_pend = st.checkbox("Solo pendientes\n(< 100%)", key="res_solo_pend")
+
+    vis = datos_resumen.copy()
+    vis["% Avance"] = pd.to_numeric(vis["% Avance"], errors="coerce").fillna(0)
+    if sel_est:
+        vis = vis[vis["Estado cronograma"].apply(
+            lambda e: any(t.strip() in sel_est for t in str(e).split("/")))]
+    vis = vis[vis["% Avance"] >= min_av]
+    if solo_pend:
+        vis = vis[vis["% Avance"] < 100.0]
+    vis = vis.reset_index(drop=True)
+
+    # ---------------- Filtros de novedades ----------------
+    if "Novedades del día" in datos_resumen.columns:
+        g1, g2 = st.columns([2.2, 1])
+        cats_nov = sorted({str(c) for c in datos_resumen["Categoría Novedad"]
+                           if str(c).strip() and str(c).strip().lower()
+                           not in ("nan", "sin novedad", "—")})
+        with g1:
+            sel_cat = st.multiselect("🏷️ Categoría Novedad", options=cats_nov,
+                                     default=[], key="res_catnov",
+                                     placeholder="Todas las categorías (sin filtrar)")
+        with g2:
+            solo_nov = st.checkbox("Solo novedades del día", key="res_solo_nov")
+        if sel_cat:
+            vis = vis[vis["Categoría Novedad"].astype(str).isin(sel_cat)]
+        if solo_nov:
+            vis = vis[pd.to_numeric(vis["Novedades del día"], errors="coerce").fillna(0) > 0]
         vis = vis.reset_index(drop=True)
 
-        # ---------------- Filtros de novedades ----------------
-        if "Novedades del día" in datos_resumen.columns:
-            g1, g2 = st.columns([2.2, 1])
-            cats_nov = sorted({str(c) for c in datos_resumen["Categoría Novedad"]
-                               if str(c).strip() and str(c).strip().lower()
-                               not in ("nan", "sin novedad", "—")})
-            with g1:
-                sel_cat = st.multiselect("🏷️ Categoría Novedad", options=cats_nov,
-                                         default=[], key="res_catnov",
-                                         placeholder="Todas las categorías (sin filtrar)")
-            with g2:
-                solo_nov = st.checkbox("Solo novedades del día", key="res_solo_nov")
-            if sel_cat:
-                vis = vis[vis["Categoría Novedad"].astype(str).isin(sel_cat)]
-            if solo_nov:
-                vis = vis[pd.to_numeric(vis["Novedades del día"], errors="coerce").fillna(0) > 0]
-            vis = vis.reset_index(drop=True)
+    info_f, btn_f = st.columns([3, 1])
+    with info_f:
+        st.caption("ℹ️ Los filtros de **este resumen** son independientes de los KPIs "
+                   "superiores (que usan el módulo y los filtros del sidebar).")
+    with btn_f:
+        # on_click: el reinicio corre ANTES de crear los widgets en el siguiente
+        # rerun. Escribir en session_state aquí dentro lanzaría
+        # StreamlitWidgetAlreadyInstantiatedError (los filtros de arriba ya existen).
+        st.button("♻️ Restablecer filtros del resumen", key=f"reset_res_{tipo}",
+                  width="stretch", on_click=_limpiar_filtros_resumen)
 
-        info_f, btn_f = st.columns([3, 1])
-        with info_f:
-            st.caption("ℹ️ Los filtros de **este resumen** son independientes de los KPIs "
-                       "superiores (que usan el módulo y los filtros del sidebar).")
-        with btn_f:
-            # on_click: el reinicio corre ANTES de crear los widgets en el siguiente
-            # rerun. Escribir en session_state aquí dentro lanzaría
-            # StreamlitWidgetAlreadyInstantiatedError (los filtros de arriba ya existen).
-            st.button("♻️ Restablecer filtros del resumen", key=f"reset_res_{tipo}",
-                      width="stretch", on_click=_limpiar_filtros_resumen)
+    if vis.empty:
+        st.info("Sin oficinas que cumplan los filtros del resumen.")
+        return
 
-        if vis.empty:
-            st.info("Sin oficinas que cumplan los filtros del resumen.")
-            return
+    n_vis = len(vis)
+    vt = int(vis["Total elementos"].sum())
+    vs = int(vis["Subsanados (MT)"].sum())
+    vp = vt - vs
+    va = (vs / vt * 100) if vt else 0.0
+    nd = (int(pd.to_numeric(vis["Novedades del día"], errors="coerce").fillna(0).sum())
+          if "Novedades del día" in vis.columns else 0)
+    na = (int(pd.to_numeric(vis["Novedades acumuladas"], errors="coerce").fillna(0).sum())
+          if "Novedades acumuladas" in vis.columns else 0)
+    fila_total = {c: "" for c in vis.columns}
+    fila_total.update({"SBAN": "TOTAL", "Oficina": f"{n_vis} oficina(s)", "Estado": "—",
+                       "Total elementos": vt, "Subsanados (MT)": vs, "Pendientes": vp,
+                       "% Avance": round(va, 1), "Categoría Novedad": "—",
+                       "Novedades del día": nd, "Novedades acumuladas": na})
+    vis.loc[n_vis] = fila_total
+    if "Estado cronograma" in vis.columns:
+        vis = vis.drop(columns=["Estado cronograma"])
+    if MODO_PUBLICO and "Obs. novedad" in vis.columns:
+        vis = vis.drop(columns=["Obs. novedad"])
 
-        n_vis = len(vis)
-        vt = int(vis["Total elementos"].sum())
-        vs = int(vis["Subsanados (MT)"].sum())
-        vp = vt - vs
-        va = (vs / vt * 100) if vt else 0.0
-        nd = (int(pd.to_numeric(vis["Novedades del día"], errors="coerce").fillna(0).sum())
-              if "Novedades del día" in vis.columns else 0)
-        na = (int(pd.to_numeric(vis["Novedades acumuladas"], errors="coerce").fillna(0).sum())
-              if "Novedades acumuladas" in vis.columns else 0)
-        fila_total = {c: "" for c in vis.columns}
-        fila_total.update({"SBAN": "TOTAL", "Oficina": f"{n_vis} oficina(s)", "Estado": "—",
-                           "Total elementos": vt, "Subsanados (MT)": vs, "Pendientes": vp,
-                           "% Avance": round(va, 1), "Categoría Novedad": "—",
-                           "Novedades del día": nd, "Novedades acumuladas": na})
-        vis.loc[n_vis] = fila_total
-        if "Estado cronograma" in vis.columns:
-            vis = vis.drop(columns=["Estado cronograma"])
-        if MODO_PUBLICO and "Obs. novedad" in vis.columns:
-            vis = vis.drop(columns=["Obs. novedad"])
-
-        st.caption(
-            f"Atribución: **{etiqueta}** · Mostrando **{n_vis}** de {len(datos_resumen)} oficinas · "
-            "Cada fila agrupa SBAN + nombre de oficina."
-        )
-        st.dataframe(
-            vis,
-            width="stretch",
-            hide_index=True,
-            height=min(460, 38 + 34 * len(vis)),
-            column_config={
-                "SBAN": st.column_config.TextColumn("SBAN", width="small"),
-                "Oficina": st.column_config.TextColumn("Oficina", width="large"),
-                "Estado": st.column_config.TextColumn(
-                    "Estado", width="small",
-                    help="🟩 Finalizada · 🟨 En proceso · ⬜ Programada · 🟪 Reprogramada"),
-                "Total elementos": st.column_config.NumberColumn("Total", format="%d", width="small"),
-                "Subsanados (MT)": st.column_config.NumberColumn("Subsanados", format="%d", width="small"),
-                "Pendientes": st.column_config.NumberColumn("Pendientes", format="%d", width="small"),
-                "% Avance": st.column_config.ProgressColumn(
-                    "Avance MT3", help="Porcentaje de equipos con consecutivo MT",
-                    format="%.1f%%", min_value=0, max_value=100),
-                "Categoría Novedad": st.column_config.TextColumn("Categoría novedad", width="medium"),
-                "Novedades del día": st.column_config.NumberColumn(
-                    "Nov. del día", format="%d", width="medium",
-                    help="Novedades registradas en la fecha de corte (hoy)"),
-                "Novedades acumuladas": st.column_config.NumberColumn(
-                    "Nov. acumuladas", format="%d", width="medium",
-                    help="Novedades acumuladas desde el inicio del registro"),
-                "Obs. novedad": st.column_config.TextColumn("Obs. novedad", width="large"),
-            },
-        )
-        m1, m2, m3 = st.columns(3)
-        m1.metric("🏢 Oficinas mostradas", f"{n_vis:,}".replace(",", "."), border=True,
-                  help="Filas de la tabla (una por SBAN) que cumplen los filtros del resumen. "
-                       "El detalle por sede está en la tabla de abajo.")
-        m2.metric("🏷️ Novedades del día", f"{nd:,}".replace(",", "."), border=True,
-                  help="Novedades de las oficinas con la fecha más reciente del archivo "
-                       "(hoja 'Novedades Equipos').")
-        m3.metric("📚 Novedades acumuladas", f"{na:,}".replace(",", "."), border=True,
-                  help="Total histórico de novedades registradas para esas oficinas.")
-        st.caption("Los conteos de **equipos** (Total · Subsanados · Pendientes · Avance) están en "
-                   "las tarjetas KPI de arriba; aquí solo se repiten **por fila** en la tabla.")
-        st.download_button(
-            "⬇️ Descargar Excel (vista filtrada + gráficos + novedades)",
-            data=generar_excel_resumen(vis),
-            file_name="Resumen_por_oficina_MT3.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            width="stretch",
-        )
-        st.caption("Estado en badges: 🟩 Finalizada · 🟨 En proceso · ⬜ Programada · "
-                   "🟪 Reprogramada · 🟠 Categoría de novedad presente · "
-                   "barra de progreso en la columna Avance MT3.")
+    st.caption(
+        f"Atribución: **{etiqueta}** · Mostrando **{n_vis}** de {len(datos_resumen)} oficinas · "
+        "Cada fila agrupa SBAN + nombre de oficina."
+    )
+    st.dataframe(
+        vis,
+        width="stretch",
+        hide_index=True,
+        height=min(460, 38 + 34 * len(vis)),
+        column_config={
+            "SBAN": st.column_config.TextColumn("SBAN", width="small"),
+            "Oficina": st.column_config.TextColumn("Oficina", width="large"),
+            "Estado": st.column_config.TextColumn(
+                "Estado", width="small",
+                help="🟩 Finalizada · 🟨 En proceso · ⬜ Programada · 🟪 Reprogramada"),
+            "Total elementos": st.column_config.NumberColumn("Total", format="%d", width="small"),
+            "Subsanados (MT)": st.column_config.NumberColumn("Subsanados", format="%d", width="small"),
+            "Pendientes": st.column_config.NumberColumn("Pendientes", format="%d", width="small"),
+            "% Avance": st.column_config.ProgressColumn(
+                "Avance MT3", help="Porcentaje de equipos con consecutivo MT",
+                format="%.1f%%", min_value=0, max_value=100),
+            "Categoría Novedad": st.column_config.TextColumn("Categoría novedad", width="medium"),
+            "Novedades del día": st.column_config.NumberColumn(
+                "Nov. del día", format="%d", width="medium",
+                help="Novedades registradas en la fecha de corte (hoy)"),
+            "Novedades acumuladas": st.column_config.NumberColumn(
+                "Nov. acumuladas", format="%d", width="medium",
+                help="Novedades acumuladas desde el inicio del registro"),
+            "Obs. novedad": st.column_config.TextColumn("Obs. novedad", width="large"),
+        },
+    )
+    st.caption("Los conteos de **equipos** (Total · Subsanados · Pendientes · Avance) están en "
+               "las tarjetas KPI de arriba; aquí solo se repiten **por fila** en la tabla.")
+    st.download_button(
+        "⬇️ Descargar Excel (vista filtrada + gráficos + novedades)",
+        data=generar_excel_resumen(vis),
+        file_name="Resumen_por_oficina_MT3.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        width="stretch",
+    )
+    st.caption("Estado en badges: 🟩 Finalizada · 🟨 En proceso · ⬜ Programada · "
+               "🟪 Reprogramada · 🟠 Categoría de novedad presente · "
+               "barra de progreso en la columna Avance MT3.")
 
 
 # ----------------------------------------------------------------------------
@@ -3468,7 +3474,12 @@ def main():
             st.info("Sin datos de Regional/Estado para el mapa de calor con los filtros actuales.")
 
     with tab_res:
-        # Avance por JEFATURA (columna AA) y luego el resumen por oficina
+        # Dos niveles, siempre visibles (Opción A: sin expanders escondidos):
+        #   1) Jefaturas (columna AA: «01300- MEDELLIN») — equipos propios de cada jefatura
+        #   2) Oficinas (una fila por SBAN) — el detalle sede por sede
+        st.caption("Esta pestaña tiene **dos niveles**: arriba el avance de las **jefaturas** "
+                   "(sus propios equipos) y abajo el **resumen por oficina**, sede por sede. "
+                   "Todo está a la vista: no hay bloques que se puedan perder.")
         render_jefaturas(df, kpi_campos)
         st.markdown("---")
         # Resumen por oficina (Total / Subsanados / Pendientes / % Avance / Novedades)

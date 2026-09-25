@@ -123,6 +123,8 @@ COLUMNAS_CONSERVAR = {
              "Regional", "Consecutivo mantenimiento 3",                       # [CLAVE]
              "Fecha de mantenimiento 3", "Facturable"],                       # [CLAVE]
     "campos": {
+        # El SBAN del archivo Campos se escribe como «SBAN» aunque en el original venga
+        # con el encabezado dañado: el panel lo lee por NOMBRE.
         "Dashboard_KPI": ["SBAN", "Nombre Oficina", "Fecha Inicio", "Fecha Fin",
                           "Estado de la sede", "ESTADO UPS", "OBSERVACIONES", "UPS"],
         "Novedades Equipos": ["SBAN", "SBAN PCT", "Fecha", "Serial ",         # [CLAVE SBAN,
@@ -392,10 +394,27 @@ def anonimizar(df: pd.DataFrame, tipo: str) -> pd.DataFrame:
     return df
 
 
+def arreglar_encabezados(df: pd.DataFrame, tipo: str, hoja: str) -> pd.DataFrame:
+    """Repara encabezados que el Excel trae mal (sin nombre o con un número).
+
+    Caso real: en `Dashboard_KPI` la primera columna (que es el SBAN) llega con el
+    encabezado dañado (aparece como `56`). El panel ya lo tolera leyendo por posición,
+    pero la ingesta valida por NOMBRE, así que aquí se renombra a «SBAN».
+    """
+    if tipo != "campos" or hoja != "Dashboard_KPI" or len(df.columns) == 0:
+        return df
+    if buscar_columna(df, "SBAN") is None:
+        primera = df.columns[0]
+        df = df.rename(columns={primera: "SBAN"})
+        print(f"    · encabezado reparado: la primera columna ({primera!r}) se tomó como 'SBAN'")
+    return df
+
+
 def preparar_hoja(path: Path, tipo: str, hoja: str) -> pd.DataFrame:
     """Lee una hoja y le aplica todo el flujo de ajuste."""
     df = pd.read_excel(path, sheet_name=hoja)
     print(f"    · {hoja}: {len(df):,} filas x {len(df.columns)} columnas".replace(",", "."))
+    df = arreglar_encabezados(df, tipo, hoja)
     df = aplicar_ajustes(df, ajustes_de(tipo, hoja), f"{tipo}/{hoja}")
     df = conservar_columnas(df, tipo, hoja)
     df = quitar_personales(df, tipo, hoja)

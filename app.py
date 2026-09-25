@@ -424,11 +424,16 @@ VALORES_FILTRO = {
 def tabla_jefaturas(df: pd.DataFrame, kpi=None) -> pd.DataFrame:
     """Avance por JEFATURA: equipos, mantenimientos hechos, pendientes y % de avance.
 
-    Las jefaturas se identifican en la columna AA («Oficina») por el patrón
-    «NNNNN-NOMBRE». El nombre se deja TAL CUAL viene en el archivo; el prefijo de
-    5 dígitos solo se usa para ubicar la regional de la que depende.
+    Las jefaturas se identifican por el CÓDIGO de la columna AA («SBAN»): 5 dígitos
+    + guion. Se soportan las dos nomenclaturas del archivo:
+
+      · actual:   AA = '01300-J'          AB = 'JEFATURA MEDELLIN'
+      · anterior: AA = '01300- MEDELLIN'  AB = '01300- MEDELLIN'
+
+    El nombre que se muestra es el de la columna AB (con los errores de escritura
+    corregidos al mostrar). El prefijo de 5 dígitos ubica la regional.
     """
-    vacio = pd.DataFrame(columns=["Jefatura", "Sede (columna AA)", "Regional (SBAN)",
+    vacio = pd.DataFrame(columns=["Jefatura", "Código (columna AA)", "Regional (SBAN)",
                                   "Regional", "Equipos", "Realizados", "Pendientes",
                                   "Avance %", "Reportado (Campos)"])
     if df is None or getattr(df, "empty", True) or "_jefatura" not in df.columns:
@@ -437,7 +442,7 @@ def tabla_jefaturas(df: pd.DataFrame, kpi=None) -> pd.DataFrame:
     if j.empty:
         return vacio
     g = (j.groupby("_jefatura")
-         .agg(**{"Sede (columna AA)": ("Oficina", "first"),
+         .agg(**{"Código (columna AA)": ("_jefatura_codigo", "first"),
                  "Regional (SBAN)": ("_jefatura_reg", "first"),
                  "Regional": ("Regional", lambda s: s.mode().iloc[0] if len(s) else ""),
                  "Equipos": ("Serial", "size"),
@@ -464,27 +469,32 @@ def render_jefaturas(df: pd.DataFrame, kpi=None):
     t = tabla_jefaturas(df, kpi)
     st.markdown("#### 🏛️ Avance por jefatura")
     if t.empty:
-        st.info("Este archivo no trae filas de jefatura (columna AA con formato «01300- MEDELLIN»). "
-                "Aparecerán aquí en cuanto el archivo las incluya.")
+        st.info("Este archivo no trae filas de jefatura (columna AA con formato «01300-J» o "
+                "«01300- MEDELLIN»). Aparecerán aquí en cuanto el archivo las incluya.")
         return
     hechas = int((t["Pendientes"] <= 0).sum())
     c1, c2, c3 = st.columns(3)
     c1.metric("🏛️ Jefaturas identificadas", f"{len(t)}", border=True,
-              help="Filas de la columna AA con el patrón «NNNNN-NOMBRE». El archivo manda: "
-                   "no se renombra ninguna.")
+              help="Códigos de la columna AA con el patrón «NNNNN-J» (5 dígitos + guion). "
+                   "El nombre se toma de la columna AB del archivo.")
     c2.metric("✅ Jefaturas completas", f"{hechas} de {len(t)}", border=True,
               help="Jefaturas cuyo mantenimiento está hecho en todos sus equipos.")
     c3.metric("⚠️ Equipos pendientes en jefaturas",
               f"{int(t['Pendientes'].sum()):,}".replace(",", "."), border=True,
               help="Suma de pendientes de las jefaturas (no incluye sus oficinas).")
+    corregidas = df.attrs.get("jefaturas_corregidas") or []
+    if corregidas:
+        st.caption("✏️ Se corrigió la escritura de: "
+                   + " · ".join(f"`{c}`" for c in corregidas)
+                   + " (se muestra corregido; el archivo de origen no se modifica).")
 
     st.dataframe(
         t, hide_index=True, width="stretch", height=min(460, 40 + 35 * len(t)),
         column_config={
             "Jefatura": st.column_config.TextColumn("Jefatura", width="medium"),
-            "Sede (columna AA)": st.column_config.TextColumn(
-                "Sede (columna AA)", width="medium",
-                help="Así viene escrita la jefatura en el archivo, sin cambios."),
+            "Código (columna AA)": st.column_config.TextColumn(
+                "Código (columna AA)", width="small",
+                help="Así viene el código en el archivo (p. ej. «01300-J»)."),
             "Regional (SBAN)": st.column_config.TextColumn("Regional (SBAN)", width="small"),
             "Regional": st.column_config.TextColumn("Regional", width="small"),
             "Equipos": st.column_config.NumberColumn("Equipos", format="%d", width="small"),
@@ -498,8 +508,7 @@ def render_jefaturas(df: pd.DataFrame, kpi=None):
         },
     )
     st.caption("Solo equipos propios de cada jefatura (las oficinas que dependen de ellas "
-               "se ven en la tabla de abajo). El archivo manda: los nombres son los de la "
-               "columna AA.")
+               "se ven en la tabla de abajo). El nombre es el de la columna AB del archivo.")
 
 
 def _quitar_filtro(clave: str):
@@ -820,44 +829,64 @@ COLUMNAS_TECNICO = [
 # Carga y preparación de datos (con caché)
 # ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
-# Jefaturas: en la columna AA («Oficina») las jefaturas vienen escritas como
-# «NNNNN-NOMBRE» (5 dígitos + guion + nombre). Todo lo demás es una oficina
-# normal (solo SBAN numérico). El prefijo de 5 dígitos es la regional de la que
-# depende la jefatura.
+# Jefaturas: se identifican por el CÓDIGO de la columna AA («SBAN»), que trae
+# 5 dígitos + guion. Hay dos nomenclaturas y las dos se soportan:
+#
+#   · Actual  (24 sept en adelante):  AA = '01300-J'            AB = 'JEFATURA MEDELLIN'
+#   · Anterior (hasta el 23 sept):    AA = '01300- MEDELLIN'    AB = '01300- MEDELLIN'
+#
+# El prefijo de 5 dígitos es la REGIONAL de la que depende la jefatura.
 # ----------------------------------------------------------------------------
-PATRON_JEFATURA = re.compile(r"^\s*(\d{5})\s*-\s*(.+?)\s*$")
+PATRON_JEFATURA = re.compile(r"^\s*(\d{5})\s*-\s*(.*?)\s*$")
+
+# Correcciones de escritura que trae el archivo (se avisa en la interfaz).
+# Se corrige SOLO al mostrar: no se toca el dato de origen.
+CORRECCIONES_JEFATURA = {
+    "JEFATUTA": "JEFATURA",     # 'JEFATUTA SINCELEJO' -> 'JEFATURA SINCELEJO'
+}
 
 
-def jefatura_de(oficina) -> str:
-    """Devuelve el nombre de la jefatura si la oficina es una jefatura, si no ''.
+def normalizar_nombre_jefatura(nombre) -> str:
+    """Corrige errores de escritura del archivo (p. ej. JEFATUTA -> JEFATURA).
 
-    Ejemplos (el archivo manda, no se renombra nada):
-        '01300- MEDELLIN'  -> 'MEDELLIN'
-        '01600- BQUILLA'   -> 'BQUILLA'
-        '01800-MANIZALES'  -> 'MANIZALES'
-        'FUNZA'            -> ''   (oficina normal)
+    Si el nombre venía como '01300- MEDELLIN' (nomenclatura anterior) se toma solo
+    lo que va después del guion.
     """
-    m = PATRON_JEFATURA.match(str(oficina or ""))
+    texto = str(nombre or "").strip()
+    m = PATRON_JEFATURA.match(texto)
+    if m:
+        # Si después del guion no hay nada (caso '01300-J'), el nombre real viene aparte.
+        texto = m.group(2).strip()
+    for mal, bien in CORRECCIONES_JEFATURA.items():
+        if mal in texto.upper():
+            texto = re.sub(mal, bien, texto, flags=re.IGNORECASE)
+    return texto.strip()
+
+
+def sufijo_jefatura(codigo) -> str:
+    """Lo que va después del guion en la columna AA ('01300-J' -> 'J', '01300- MED' -> 'MED')."""
+    m = PATRON_JEFATURA.match(str(codigo or ""))
     return m.group(2).strip() if m else ""
 
 
-def regional_de_jefatura(oficina) -> str:
+def regional_de_jefatura(codigo) -> str:
     """Código SBAN de la regional a la que pertenece la jefatura ('' si no es jefatura)."""
-    m = PATRON_JEFATURA.match(str(oficina or ""))
+    m = PATRON_JEFATURA.match(str(codigo or ""))
     return m.group(1) if m else ""
 
 
-def es_jefatura(oficina) -> bool:
-    """True si el nombre trae números Y letras en el patrón de jefatura."""
-    return PATRON_JEFATURA.match(str(oficina or "")) is not None
+def es_jefatura(codigo) -> bool:
+    """True si el código de la columna AA es un código de jefatura (5 dígitos + guion)."""
+    return PATRON_JEFATURA.match(str(codigo or "")) is not None
 
 
 def codigo_de(valor) -> str:
     """Código SBAN de 5 dígitos.
 
-    Tolera los dos formatos que trae el archivo en la columna AA (SBAN):
+    Tolera los formatos que traen las columnas AA/AB:
       - oficina normal: '1500', '1500.0'  -> '01500'
-      - jefatura:       '01300- MONTERIA' -> '01300'   (se toma el prefijo)
+      - jefatura:       '01300-J'         -> '01300'   (se toma el prefijo)
+      - jefatura vieja: '01300- MONTERIA' -> '01300'   (se toma el prefijo)
     Así las jefaturas siguen contando dentro de su regional y el panel no falla.
     """
     m = PATRON_JEFATURA.match(str(valor or ""))
@@ -894,12 +923,29 @@ def _cargar_y_preparar(path: str, mtime: float) -> pd.DataFrame:
         lambda v: _formato_placa(v) if pd.notna(v) else ""
     ).astype(str)
 
-    # --- Jefatura: en el archivo viene escrita en la columna AA («SBAN» u «Oficina»)
-    #     con el patrón «NNNNN-NOMBRE» (5 dígitos + guion + nombre). ---
-    df["_jefatura"] = df["Oficina"].apply(jefatura_de)
-    df["_jefatura_reg"] = df["Oficina"].apply(regional_de_jefatura)
-    df["_es_jefatura"] = df["_jefatura"].ne("")
-    df["_nivel"] = np.where(df["_es_jefatura"], "Jefatura", "Oficina")
+    # --- Jefatura: se detecta por el CÓDIGO de la columna AA («SBAN»), que para una
+    #     jefatura viene como «NNNNN-J» (actual) o «NNNNN- NOMBRE» (anterior). El
+    #     nombre se toma de la columna AB («Oficina»), que es la que lo trae. ---
+    _cod = df["SBAN"].astype(str).str.strip()
+    _es_jef = _cod.apply(es_jefatura)
+    _suf = _cod.apply(sufijo_jefatura)
+    _nom_ab = df["Oficina"].apply(normalizar_nombre_jefatura)
+    # El sufijo cuenta como nombre solo si NO es la simple marca de jefatura ('J').
+    #   '01300-J'          -> marca, el nombre está en la columna AB
+    #   '01300- MEDELLIN'  -> el sufijo ES el nombre
+    _suf_es_nombre = _suf.ne("") & ~_suf.str.upper().eq("J")
+    df["_jefatura"] = np.where(_es_jef,
+                               np.where(_suf_es_nombre,
+                                        _suf.apply(normalizar_nombre_jefatura), _nom_ab),
+                               "")
+    df["_jefatura_codigo"] = np.where(_es_jef, _cod, "")
+    df["_jefatura_reg"] = _cod.apply(regional_de_jefatura)
+    df["_es_jefatura"] = _es_jef
+    df["_nivel"] = np.where(_es_jef, "Jefatura", "Oficina")
+    # Aviso: nombres que venían con error de escritura y se corrigieron al mostrar.
+    _corregidos = sorted({str(o).strip() for o in df.loc[_es_jef, "Oficina"]
+                          if normalizar_nombre_jefatura(o) != str(o).strip()})
+    df.attrs["jefaturas_corregidas"] = _corregidos
 
     # --- SBAN: código de oficina (visible y buscable, formato 5 dígitos).
     #     Para las jefaturas toma el prefijo, así no se pierden de su regional. ---
@@ -1096,6 +1142,26 @@ def _mejor_por_sban(valores, prioridad):
     return mejor
 
 
+def columna_sban(kpi):
+    """Columna con el SBAN en Dashboard_KPI, tolerando el encabezado dañado.
+
+    En varios archivos la PRIMERA columna (que es el SBAN) llega sin nombre o con un
+    número (p. ej. `56`). Se busca por nombre y, si no está, se usa la primera columna.
+    """
+    if kpi is None or getattr(kpi, "empty", True):
+        return None
+    c = _col(kpi, "SBAN", "Codigo SBAN", "Código SBAN")
+    if c is not None:
+        return c
+    if len(kpi.columns):
+        # Respaldo por posición: solo si la primera columna parece traer códigos.
+        primera = kpi.columns[0]
+        muestra = kpi[primera].dropna().astype(str).head(50)
+        if len(muestra) and muestra.str.fullmatch(r"\d{1,5}(\.0)?").mean() > 0.8:
+            return primera
+    return None
+
+
 def preparar_campos(kpi, nov, df=None):
     """Normaliza Dashboard_KPI (estado de la sede, ESTADO UPS, observaciones) y Novedades Equipos (por SBAN).
 
@@ -1113,7 +1179,8 @@ def preparar_campos(kpi, nov, df=None):
         ups = _col(kpi, "ESTADO UPS")
         obs = _col(kpi, "Observaciones actas PCT")
         obs_ups = _col(kpi, "OBSERVACIONES")
-        sban = kpi[_col(kpi, "SBAN")] if _col(kpi, "SBAN") else pd.Series(dtype=str)
+        c_sban = columna_sban(kpi)
+        sban = kpi[c_sban] if c_sban is not None else pd.Series(dtype=str)
         k = pd.DataFrame({
             "_SBAN": sban.apply(_pad5),
             "Estado sede": (kpi[est].fillna("").astype(str).str.strip()
@@ -1433,27 +1500,26 @@ def render_avance_ups(k, df, seleccion=None):
     n_con_ups = int(con_ups.sum())
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🔋 Oficinas que ya reportaron", f"{reportadas} de {total}",
+    # La columna AP («ESTADO UPS») es la fuente de verdad: es donde Calidad del Banco y
+    # COLSOF concilian las cifras, aunque la columna N diga otra cosa.
+    c1.metric("✅ UPS finalizadas (columna AP)", f"{fin} de {total}",
+              delta=f"{total - fin} sin finalizar", delta_color="off", border=True,
+              help="**Fuente de verdad**: la columna «ESTADO UPS» del archivo Campos dashboard, "
+                   "donde Calidad del Banco y COLSOF concilian las cifras. Manda sobre la "
+                   "columna del estado de la sede cuando las dos no coinciden.")
+    c2.metric("🔋 Oficinas que ya reportaron", f"{reportadas} de {total}",
               delta=f"{sin_rep} sin dato", delta_color="off", border=True,
               help="Oficinas **con UPS en la Data** que ya traen algún valor en la columna "
-                   "«ESTADO UPS» del archivo. Las demás están en blanco: la oficina todavía no "
-                   "marca su avance.")
-    # NOTA: los conteos de «reportado por la oficina» y «completo según la Data» ya están en
-    # las tarjetas de indicadores de oficinas; aquí NO se repiten. Esta tarjeta mide la
-    # CONCILIACIÓN (cuántas oficinas coinciden), que es el propósito de esta pestaña.
-    c2.metric("🧩 Coinciden el reporte y la Data", f"{ambos}",
-              delta=f"de {n_con_ups} oficinas con UPS", delta_color="off", border=True,
-              help="Oficinas donde el reporte dice `Finalizado` Y todos sus UPS de la Data "
-                   "tienen mantenimiento hecho. Los dos conteos por separado están en las "
-                   "tarjetas «🔋 UPS finalizadas (reportado)» y «🏢 Oficinas con UPS completo».")
+                   "«ESTADO UPS». Las demás están en blanco: la oficina todavía no marca su avance.")
     c3.metric("🟨 En proceso · ⬜ Programadas", f"{proc} · {prog}",
               help="Conteo del estado reportado en los demás casos. " + (f"Sin dato: {sin_rep}."
                    if sin_rep else "Todas las oficinas tienen dato."), border=True)
     c4.metric("⚠️ Diferencias reporte vs Data", f"{solo_ap + solo_mt3}",
               delta_color="inverse" if (solo_ap + solo_mt3) else "off",
               border=True,
-              help="Oficinas donde lo que reportó la oficina y lo que muestra la Data no "
-                   "coinciden. El detalle está en el desplegable de conciliación.")
+              help="Oficinas donde lo que reportó la oficina (columna AP, la que manda) y lo que "
+                   "muestra la Data no coinciden. El detalle está en el desplegable de "
+                   "conciliación.")
 
     with st.expander("❓ Conciliación: lo reportado por la oficina vs la Data",
                      expanded=False):
@@ -2039,7 +2105,7 @@ def oficinas_campos(kpi_campos, seleccion=None, click_sban=None):
     """
     if kpi_campos is None or getattr(kpi_campos, "empty", True):
         return set(), 0, 0, 0
-    c_sb = _col(kpi_campos, "SBAN")
+    c_sb = columna_sban(kpi_campos)
     if c_sb is None:
         return set(), 0, 0, 0
     kk = kpi_campos.copy()
@@ -2278,27 +2344,31 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
     with cols[4]:
         if rep_ap or fin_ap:
             cols[4].metric(
-                "🔋 UPS finalizadas (reportado)", f"{fin_ap} de {n_universo}",
-                delta=f"{n_universo - fin_ap} sin reportar",
+                "🔋 UPS finalizadas (columna AP)", f"{fin_ap} de {n_universo}",
+                delta=f"{n_universo - fin_ap} sin finalizar",
                 delta_color="off",
-                help="Lo que la oficina reportó en la columna «ESTADO UPS» del archivo Campos "
-                     f"dashboard, contada por SBAN único: {fin_ap} oficinas con 'Finalizado' de "
-                     f"{n_universo}. Las otras {n_universo - fin_ap} todavía no traen ese dato.",
+                help="**Fuente de verdad**: la columna «ESTADO UPS» (AP) del archivo Campos "
+                     "dashboard, donde Calidad del Banco y COLSOF concilian las cifras. Contada "
+                     f"por sede única: {fin_ap} oficinas con 'Finalizado' de {n_universo}. Las "
+                     f"otras {n_universo - fin_ap} todavía no traen ese dato. Cuando la columna "
+                     "del estado de la sede dice otra cosa, manda esta.",
                 border=True,
             )
         else:
-            cols[4].metric("🔋 UPS finalizadas (reportado)", "n/d",
-                           help="Campos dashboard sin la columna de estado de UPS", border=True)
+            cols[4].metric("🔋 UPS finalizadas (columna AP)", "n/d",
+                           help="Campos dashboard sin la columna «ESTADO UPS»", border=True)
 
     st.caption("**Cómo leer estas tarjetas.** Todas usan el mismo universo (las "
                f"{n_universo} oficinas del archivo) y los mismos filtros: Oficina · Facturación · "
                "clic del ranking · solo pendientes. "
                "**«Oficinas con … completo»** = el panel revisa la Data de ejecución y cuenta las "
                "oficinas donde ya se le hizo mantenimiento a TODOS sus equipos. "
-               "**«Oficinas reportadas como finalizadas»** y **«UPS finalizadas (reportado)»** = "
-               "lo que la propia oficina reportó en el archivo Campos dashboard. "
-               "Son fuentes distintas: por eso pueden no coincidir (las diferencias se detallan en "
-               "la pestaña 🔋 Avance UPS)."
+               "**«Oficinas reportadas como finalizadas»** = el estado de la sede del archivo "
+               "Campos. **«UPS finalizadas (columna AP)»** = la columna «ESTADO UPS», que es "
+               "**la fuente de verdad de las UPS** (allí Calidad del Banco y COLSOF concilian): "
+               "cuando el estado de la sede dice otra cosa, manda la de UPS. "
+               "Las diferencias entre fuentes se detallan en la pestaña 🔋 UPS: avance y "
+               "diferencias."
                + (f" La Data trae {n_datos} oficinas: {n_datos - n_universo} de ellas no está(n) "
                   "en el archivo y no entran en las tarjetas." if n_datos > n_universo else ""))
 
@@ -3231,7 +3301,15 @@ def main():
         if pd.isna(v):
             return None
         sban = _pad5(v)
-        return estados_sede.get(sban) or estados_crono.get(int(v))
+        # El diccionario del cronograma está indexado por número: se usa el código
+        # normalizado (tolera '01600-J' y '01600- MEDELLIN' sin reventar con int()).
+        estado = estados_sede.get(sban)
+        if estado:
+            return estado
+        try:
+            return estados_crono.get(int(sban))
+        except (TypeError, ValueError):
+            return None
 
     df["_est_crono"] = df["SBAN"].map(_estado_sban).fillna("Sin cronograma")
 

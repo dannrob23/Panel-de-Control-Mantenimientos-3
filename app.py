@@ -1142,6 +1142,20 @@ def _mejor_por_sban(valores, prioridad):
     return mejor
 
 
+def clave_sitio(codigo, nombre) -> str:
+    """Clave ÚNICA de sede: código + nombre de la oficina.
+
+    El código solo no basta: en Campos hay 7 códigos repetidos (varias jefaturas
+    comparten el mismo `NNNNN-J`, y en `09000` conviven Dirección General, AVIANCA y
+    Sudameris). Agrupando solo por código, el panel fusionaba esas sedes y sus cifras
+    quedaban una unidad por debajo de lo que se ve al filtrar el archivo (410 -> 409,
+    290 -> 288). Con código + nombre cada sede se cuenta por separado y cuadra.
+    """
+    c = str(codigo or "").strip()
+    n = str(nombre or "").strip()
+    return f"{c} | {n}" if n and n.lower() != "nan" else c
+
+
 def columna_sban(kpi):
     """Columna con el SBAN en Dashboard_KPI, tolerando el encabezado dañado.
 
@@ -1180,9 +1194,12 @@ def preparar_campos(kpi, nov, df=None):
         obs = _col(kpi, "Observaciones actas PCT")
         obs_ups = _col(kpi, "OBSERVACIONES")
         c_sban = columna_sban(kpi)
+        c_nom = _col(kpi, "Nombre Oficina")
         sban = kpi[c_sban] if c_sban is not None else pd.Series(dtype=str)
+        nombres = (kpi[c_nom].astype(str) if c_nom else pd.Series([""] * len(kpi)))
         k = pd.DataFrame({
             "_SBAN": sban.apply(_pad5),
+            "Oficina KPI": nombres.str.strip(),
             "Estado sede": (kpi[est].fillna("").astype(str).str.strip()
                             if est else pd.Series([""] * len(kpi))),
             "Estado UPS": (kpi[ups].fillna("").astype(str).str.strip()
@@ -1192,14 +1209,16 @@ def preparar_campos(kpi, nov, df=None):
             "Obs. UPS": (kpi[obs_ups].fillna("").astype(str).str.strip()
                          if obs_ups else pd.Series([""] * len(kpi))),
         })
+        # Clave única de sede: código + nombre (hay códigos repetidos entre jefaturas).
+        k["_CLAVE"] = [clave_sitio(c, n) for c, n in zip(k["_SBAN"], k["Oficina KPI"])]
         # Declara el origen del avance UPS: la columna AP del archivo (no se deriva).
         k["Fuente UPS"] = ("Campos dashboard · col AP «ESTADO UPS»" if ups
                            else "Campos dashboard sin columna «ESTADO UPS»")
         k = k[k["_SBAN"].astype(str).str.len() > 0]
 
-        # Un SBAN puede tener varias filas (Regional/Jefatura/sede): se resume con la
-        # MISMA regla de prioridad que usan las tarjetas de oficinas (`_mejor_por_sban`),
-        # para que ninguna cifra difiera entre vistas.
+        # Una sede puede traer varias filas: se resume con la MISMA regla de prioridad
+        # que usan las tarjetas de oficinas (`_mejor_por_sban`), para que ninguna cifra
+        # difiera entre vistas.
         def _ultimo_lleno(serie):
             """Última observación no vacía (evita perder texto en filas secundarias)."""
             for x in reversed(list(serie)):
@@ -1207,18 +1226,21 @@ def preparar_campos(kpi, nov, df=None):
                     return str(x).strip()
             return ""
 
-        mapa_sede = _mejor_por_sban(zip(k["_SBAN"].astype(str), k["Estado sede"]), _PRIO_SEDE)
+        mapa_sede = _mejor_por_sban(zip(k["_CLAVE"], k["Estado sede"]), _PRIO_SEDE)
         # El estado UPS se NORMALIZA antes de agregar, igual que en `oficinas_campos`:
         # así ambas rutas alimentan el helper con los mismos valores y no divergen.
         mapa_ups = _mejor_por_sban(
-            zip(k["_SBAN"].astype(str), k["Estado UPS"].apply(normalizar_estado_ups)),
+            zip(k["_CLAVE"], k["Estado UPS"].apply(normalizar_estado_ups)),
             _PRIO_UPS)
 
-        k = k.groupby("_SBAN", as_index=False).agg(
-            {"Obs. novedad": _ultimo_lleno, "Obs. UPS": _ultimo_lleno,
+        k = k.groupby("_CLAVE", as_index=False).agg(
+            {"_SBAN": "first", "Oficina KPI": "first",
+             "Obs. novedad": _ultimo_lleno, "Obs. UPS": _ultimo_lleno,
              "Fuente UPS": _ultimo_lleno})
-        k["Estado sede"] = k["_SBAN"].map(mapa_sede).fillna("")
-        k["Estado UPS"] = k["_SBAN"].map(mapa_ups).fillna("")
+        k["Estado sede"] = k["_CLAVE"].map(mapa_sede).fillna("")
+        k["Estado UPS"] = k["_CLAVE"].map(mapa_ups).fillna("")
+        # La clave de sede viaja con el resultado: la usan las tarjetas y la pestaña UPS.
+        k["_CLAVE"] = k["_CLAVE"].astype(str)
 
     n = pd.DataFrame()
     if nov is not None and not nov.empty:
@@ -1403,48 +1425,65 @@ def tabla_avance_ups(k, df) -> pd.DataFrame:
         ups["_mt"] = False
     if "Oficina" not in ups.columns:
         ups["Oficina"] = ""
-    if len(ups):
-        def _moda(s):
-            v = s.dropna()
-            m = v.mode() if len(v) else v
-            return m.iloc[0] if len(m) else ""
 
-        g = (ups.groupby("_SBAN")
-                .agg(**{"UPS en Data": ("Serial", "size"), "UPS con MT3": ("_mt", "sum")})
-                .reset_index())
-        g["Oficina"] = (ups.groupby("_SBAN")["Oficina"].agg(_moda)
-                        .reindex(g["_SBAN"]).values)
-        reg = _col(ups, "Regional")
-        g["Regional"] = (ups.groupby("_SBAN")[reg].agg(_moda).reindex(g["_SBAN"]).values
-                         if reg else "")
-    else:
-        g = pd.DataFrame(columns=["_SBAN", "UPS en Data", "UPS con MT3", "Oficina", "Regional"])
+    # --- Lado de la DATA: bolsa de UPS que se va CONSUMIENDO -----------------------
+    # Cada equipo UPS se cuenta exactamente una vez, aunque el respaldo por código se
+    # use en más de una fila. El respaldo sirve para las sedes cuyo NOMBRE no coincide
+    # entre la Data y Campos (bodegas, corregimientos, «CALI PASOANCHO»…). Las jefaturas
+    # NO lo usan: comparten código con su regional.
+    sobrantes = []
+    for _, r in ups.iterrows():
+        ofi = str(r["Oficina"]).strip()
+        sban = str(r["_SBAN"]).strip()
+        sobrantes.append({"sban": sban, "ofi": ofi, "mt": 1 if bool(r["_mt"]) else 0,
+                          "clave": clave_sitio(sban, ofi), "cod": clave_sitio(sban, "")})
 
-    t = k.copy()
-    t["_SBAN"] = t["_SBAN"].apply(_pad5)
-    if "Estado UPS" not in t.columns:
-        t["Estado UPS"] = ""
-    if "Obs. UPS" not in t.columns:
-        t["Obs. UPS"] = ""
-    for c in ("Oficina", "Regional"):
-        if c not in t.columns:
-            t[c] = ""
-    t = t[["_SBAN", "Oficina", "Regional", "Estado UPS", "Obs. UPS"]]
-    if len(g):
-        g = g.rename(columns={"Oficina": "Oficina Data", "Regional": "Regional Data"})
-    res = t.merge(g, on="_SBAN", how="left")
-    if "Oficina Data" in res.columns:
-        ofi_k = res["Oficina"].fillna("").astype(str).str.strip()
-        res["Oficina"] = ofi_k.where(ofi_k.ne(""), res["Oficina Data"].fillna(""))
-        reg_k = res["Regional"].fillna("").astype(str).str.strip()
-        res["Regional"] = reg_k.where(reg_k.ne(""), res["Regional Data"].fillna(""))
-        res = res.drop(columns=["Oficina Data", "Regional Data"])
-    elif "Oficina" not in res.columns:
-        res["Oficina"] = ""
-    if "Regional" not in res.columns:
-        res["Regional"] = ""
+    def consumir(predicado) -> dict:
+        """Saca de la bolsa los UPS que cumplen el predicado y devuelve el conteo."""
+        sacados = [x for x in sobrantes if predicado(x)]
+        if not sacados:
+            return {"n": 0, "mt": 0, "ofi": ""}
+        for x in sacados:
+            sobrantes.remove(x)
+        return {"n": len(sacados), "mt": sum(x["mt"] for x in sacados),
+                "ofi": sacados[0]["ofi"]}
+
+    # --- Lado de CAMPOS: una fila por sede, con su estado reportado ----------------
+    # La lista de sedes ES la de Campos (824): así «reportadas» y «finalizadas» dan
+    # exactamente 290, y los UPS se asignan por sede (o por código como respaldo).
+    filas = []
+    for _, r in k.iterrows():
+        sban = str(r["_SBAN"]).strip()
+        ofi_campos = str(r.get("Oficina KPI", "") or "").strip()
+        clave = clave_sitio(sban, ofi_campos) if ofi_campos else sban
+        es_jef = "-" in sban
+        datos = consumir(lambda x, c=clave: x["clave"] == c)
+        if datos["n"] == 0 and not es_jef:
+            cod = clave_sitio(sban, "")
+            datos = consumir(lambda x, c=cod: x["cod"] == c)
+        filas.append({
+            "SBAN": sban,
+            "Oficina": datos["ofi"] or ofi_campos,
+            "Regional": str(r.get("Regional", "") or "").strip(),
+            "UPS en Data": int(datos["n"]),
+            "UPS con MT3": int(datos["mt"]),
+            "Estado UPS": str(r.get("Estado UPS", "") or "").strip(),
+            "Observación UPS": str(r.get("Obs. UPS", "") or "").strip(),
+        })
+
+    # --- UPS de la Data que quedaron sin sede en Campos (no se pueden perder) ------
+    for x in list(sobrantes):
+        filas.append({
+            "SBAN": x["sban"], "Oficina": x["ofi"], "Regional": "",
+            "UPS en Data": 1, "UPS con MT3": x["mt"],
+            "Estado UPS": "", "Observación UPS": "",
+        })
+        sobrantes.remove(x)
+
+    res = pd.DataFrame(filas, columns=["SBAN", "Oficina", "Regional", "UPS en Data",
+                                       "UPS con MT3", "Estado UPS", "Observación UPS"])
     for c in ("UPS en Data", "UPS con MT3"):
-        res[c] = pd.to_numeric(res.get(c), errors="coerce").fillna(0).astype(int)
+        res[c] = pd.to_numeric(res[c], errors="coerce").fillna(0).astype(int)
     res["Avance MT3 %"] = ((res["UPS con MT3"] / res["UPS en Data"] * 100)
                            .where(res["UPS en Data"] > 0, 0.0).round(1))
     res["Estado UPS normalizado"] = res["Estado UPS"].apply(normalizar_estado_ups)
@@ -1456,8 +1495,7 @@ def tabla_avance_ups(k, df) -> pd.DataFrame:
         "⚠️ Marca Finalizado pero hay UPS sin MT3 en la Data")
     res.loc[~fin & con_datos & res["UPS con MT3"].ge(res["UPS en Data"]), "Alerta"] = (
         "ℹ️ Todos los UPS con MT3 pero la col AP no dice Finalizado")
-    res["SBAN"] = res["_SBAN"]
-    res = res.rename(columns={"Obs. UPS": "Observación UPS"})
+    res["SBAN"] = res["SBAN"].astype(str)      # ya viene con el código de 5 dígitos
     return res[["SBAN", "Oficina", "Regional", "UPS en Data", "UPS con MT3", "Avance MT3 %",
                 "Estado UPS", "Estado UPS normalizado", "Observación UPS", "Alerta"]]
 
@@ -1474,10 +1512,16 @@ def render_avance_ups(k, df, seleccion=None):
                 "con la columna **ESTADO UPS**. Cárgala para ver el avance de las UPS aquí.")
         return
     t = tabla_avance_ups(k, df)
+    # Sedes que reportaron UPS en la columna AP pero NO tienen UPS en la Data: en
+    # Campos sí las reportaron (cuentan en el total de la columna AP), aquí no hay
+    # equipos que mostrar. Se informan aparte para que las cifras cuadren siempre.
+    rep_sin_ups = t[(t["UPS en Data"].eq(0))
+                    & t["Estado UPS normalizado"].astype(str).str.strip().ne("")]
     t = t[t["UPS en Data"] > 0]          # mismo universo que el resto de indicadores UPS
     if seleccion:
         sbans = {str(s).split(" - ")[0] for s in seleccion}
         t = t[t["SBAN"].isin(sbans)]
+        rep_sin_ups = rep_sin_ups[rep_sin_ups["SBAN"].isin(sbans)]
     if t.empty:
         st.info("Sin sedes con UPS para los filtros seleccionados.")
         return
@@ -1502,11 +1546,14 @@ def render_avance_ups(k, df, seleccion=None):
     c1, c2, c3, c4 = st.columns(4)
     # La columna AP («ESTADO UPS») es la fuente de verdad: es donde Calidad del Banco y
     # COLSOF concilian las cifras, aunque la columna N diga otra cosa.
+    n_sin_ups = len(rep_sin_ups)
     c1.metric("✅ UPS finalizadas (columna AP)", f"{fin} de {total}",
               delta=f"{total - fin} sin finalizar", delta_color="off", border=True,
               help="**Fuente de verdad**: la columna «ESTADO UPS» del archivo Campos dashboard, "
                    "donde Calidad del Banco y COLSOF concilian las cifras. Manda sobre la "
-                   "columna del estado de la sede cuando las dos no coinciden.")
+                   "columna del estado de la sede cuando las dos no coinciden. "
+                   + (f"Incluye {n_sin_ups} sede(s) que reportaron UPS pero no tienen UPS "
+                      "cargadas en la Data." if n_sin_ups else ""))
     c2.metric("🔋 Oficinas que ya reportaron", f"{reportadas} de {total}",
               delta=f"{sin_rep} sin dato", delta_color="off", border=True,
               help="Oficinas **con UPS en la Data** que ya traen algún valor en la columna "
@@ -1541,6 +1588,7 @@ Al cruzar oficina por oficina ({n_con_ups} oficinas con UPS en la Data):
 - ⚠️ La oficina reportó `Finalizado` pero **falta mantenimiento** en **{solo_ap}** oficina(s){f" (ej. {ejemplos_ap})" if solo_ap else ""}.
 - ℹ️ Todos sus UPS ya tienen mantenimiento pero **la oficina no lo reportó** como `Finalizado`: **{solo_mt3}** oficina(s) (aparecen en la columna **Alerta** de la tabla).
 - ⚪ **{sin_rep}** oficina(s) todavía **no reportaron** ese dato: siguen en blanco en el archivo.
+{f"- 📋 **{n_sin_ups}** sede(s) reportaron UPS en la columna AP pero **no tienen UPS cargadas en la Data** (cuentan en el total reportado, pero no hay equipos que revisar): " + ", ".join(rep_sin_ups["Oficina"].astype(str).tolist()[:8]) if n_sin_ups else ""}
 
 > 💡 Por eso el indicador principal es **{fin}** (lo reportado) y el chequeo con la Data
 > (**{n_cien}**) solo sirve para detectar estas diferencias, no para reemplazar lo reportado.
@@ -2099,39 +2147,49 @@ def _sparkline_svg(valores, color: str, w: int = 118, h: int = 30) -> str:
 def oficinas_campos(kpi_campos, seleccion=None, click_sban=None):
     """Fuente ÚNICA de los indicadores oficiales de Campos dashboard.
 
-    Devuelve (universo, finalizadas_N, reportadas_AP, finalizadas_AP), todo contado por
-    **SBAN único** (no por fila) para que cualquier tarjeta que use este dato muestre
-    exactamente la misma cifra. Lo usan las tarjetas destacadas y las de indicadores.
+    Devuelve (universo, finalizadas_N, reportadas_AP, finalizadas_AP), contado por
+    **sede única = código + nombre** (no solo por código): hay 7 códigos repetidos
+    (las jefaturas comparten `NNNNN-J`, y en `09000` conviven Dirección General,
+    AVIANCA y Sudameris). Contando solo por código se fusionaban esas sedes y las
+    cifras quedaban una unidad por debajo de lo que se ve al filtrar el archivo.
+
+    Lo usan las tarjetas destacadas y las de indicadores, para que ninguna vista
+    muestre una cifra distinta.
     """
     if kpi_campos is None or getattr(kpi_campos, "empty", True):
-        return set(), 0, 0, 0
+        return {"universo": set(), "sbans": set(), "finalizadas_n": 0, "reportadas_ap": 0, "finalizadas_ap": 0}
     c_sb = columna_sban(kpi_campos)
     if c_sb is None:
-        return set(), 0, 0, 0
+        return {"universo": set(), "sbans": set(), "finalizadas_n": 0, "reportadas_ap": 0, "finalizadas_ap": 0}
     kk = kpi_campos.copy()
+    c_nom = _col(kk, "Nombre Oficina")
     kk["_SBAN"] = kk[c_sb].apply(_pad5)
+    kk["_CLAVE"] = [clave_sitio(c, n) for c, n
+                    in zip(kk["_SBAN"], kk[c_nom] if c_nom else [""] * len(kk))]
     kk = kk[kk["_SBAN"].astype(str).str.len() > 0]
     if seleccion:
         sbans = {str(s).split(" - ")[0] for s in seleccion}
         kk = kk[kk["_SBAN"].isin(sbans)]
     if click_sban:
         kk = kk[kk["_SBAN"].eq(click_sban)]
-    universo = set(kk["_SBAN"].astype(str))
+    universo = set(kk["_CLAVE"].astype(str))
+    sbans = set(kk["_SBAN"].astype(str))
 
     finalizadas_n = 0
     c_est = _col(kk, "Estado de la sede")
     if c_est is not None:
-        estados = _mejor_por_sban(zip(kk["_SBAN"].astype(str),
+        estados = _mejor_por_sban(zip(kk["_CLAVE"].astype(str),
                                       kk[c_est].fillna("").astype(str)), _PRIO_SEDE)
         finalizadas_n = sum(1 for v in estados.values() if v == "Finalizada")
     reportadas_ap = finalizadas_ap = 0
     c_ap = _col(kk, "ESTADO UPS")
     if c_ap is not None:
-        ups = _mejor_por_sban(zip(kk["_SBAN"].astype(str),
+        ups = _mejor_por_sban(zip(kk["_CLAVE"].astype(str),
                                   kk[c_ap].apply(normalizar_estado_ups)), _PRIO_UPS)
         reportadas_ap = len(ups)
         finalizadas_ap = sum(1 for v in ups.values() if v == "Finalizada")
-    return universo, finalizadas_n, reportadas_ap, finalizadas_ap
+    return {"universo": universo, "sbans": sbans, "finalizadas_n": finalizadas_n,
+            "reportadas_ap": reportadas_ap, "finalizadas_ap": finalizadas_ap}
 
 
 def tarjetas_destacadas(datos: pd.DataFrame):
@@ -2263,11 +2321,18 @@ def render_kpis_oficinas(df: pd.DataFrame, seleccion: list, f_attr: str,
     if solo_pendientes and "_pendiente" in b.columns:
         b = b[b["_pendiente"]]
 
-    # Universo y cifras oficiales: fuente ÚNICA compartida con tarjetas_destacadas()
-    universo, fin_n, rep_ap, fin_ap = oficinas_campos(kpi_campos, seleccion, click_sban)
+    # Universo y cifras oficiales: fuente ÚNICA compartida con tarjetas_destacadas().
+    # `_campos` trae las dos vistas del universo: `sbans` (códigos, para cruzar con la
+    # Data) y `universo` (sede = código + nombre, para contar). Los estados van por
+    # clave de sede, así una jefatura no se mezcla con los equipos de su regional.
+    _campos = oficinas_campos(kpi_campos, seleccion, click_sban)
+    universo = _campos["sbans"]
     if not universo:
         universo = set(df["_SBAN"].astype(str))
-    n_universo = len(universo)
+    n_universo = len(_campos["universo"]) or len(universo)
+    fin_n = _campos["finalizadas_n"]
+    rep_ap = _campos["reportadas_ap"]
+    fin_ap = _campos["finalizadas_ap"]
     n_filtro = len({s for s in b["_SBAN"].astype(str)} & universo) if len(b) else 0
     n_datos = len(set(df["_SBAN"].astype(str)))
 

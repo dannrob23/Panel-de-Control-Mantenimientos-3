@@ -342,8 +342,17 @@ La ventana muestra lo que va pasando (`📥 Detecté un cambio`, `✅ Listo…`)
 > (por ejemplo `"Oficina": {"tipo": "texto"}` o `"reemplazar": {"SI": "Si"}`).
 > El detalle está en el README, sección *Actualización diaria de datos*.
 
-### Actualizar el proyecto en otro equipo
-Doble clic en **`actualizar_panel.bat`** (trae los últimos cambios del repositorio).
+### Actualizar el panel (uso diario)
+Doble clic en **`actualizar_panel.bat`**: revisa los Excel de la carpeta, regenera los datos y los
+publica solo (tarda 1-3 minutos). Al final te dice si quedó todo subido a GitHub, así que **no hace
+falta pedir ayuda** para la actualización normal.
+
+| Si quieres… | Escribe |
+|---|---|
+| Actualizar y publicar (uso normal) | doble clic, sin nada más |
+| Solo traer los cambios de GitHub | `actualizar_panel.bat pull` |
+| Regenerar los datos sin publicar (probar) | `actualizar_panel.bat local` |
+| Ver la ayuda | `actualizar_panel.bat ayuda` |
 
 ---
 

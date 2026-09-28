@@ -181,11 +181,30 @@ el script se detiene con un mensaje claro en vez de romper el panel.
 
 ---
 
-## 🔄 Actualizar el proyecto en otro equipo
+## 🔄 Actualizar el panel (uso diario)
 
-Doble clic en **`actualizar_panel.bat`** (equivale a `git pull origin main`). Si aparece un conflicto
-(habitualmente en `data/*.xlsx` por publicaciones simultáneas), **no borrar nada**: resolver manualmente
-o pedir ayuda.
+**Doble clic en `actualizar_panel.bat`**: hace todo el ciclo en un solo paso.
+
+1. Revisa que haya Excel en `Ingesta de datos diaria` y te dice cuál es el más reciente.
+2. Trae los últimos cambios de GitHub (repo `deploy_panel`, rama `main`).
+3. Ejecuta la ingesta: ajusta columnas, valida y anonimiza.
+4. Regenera `data/` y `deploy_panel/data/`, hace commit y push.
+
+Al terminar te muestra el último commit publicado y si algo quedó sin subir (la palabra `ahead`).
+Streamlit Cloud se redespliega solo (1-2 min). Lo que hizo queda en `tools\actualizar_panel.log`.
+
+| Modo | Qué hace |
+|---|---|
+| `actualizar_panel.bat` | Ciclo completo: datos + publicación (uso diario) |
+| `actualizar_panel.bat pull` | Solo traer los cambios de GitHub a este PC |
+| `actualizar_panel.bat local` | Regenerar los datos **sin** publicar (para probar) |
+| `actualizar_panel.bat ayuda` | Ver la ayuda en pantalla |
+
+> 🔐 En este equipo `git` necesita `http.sslBackend=openssl` para conectar con GitHub (`schannel`
+> falla con `SEC_E_NO_CREDENTIALS`); el `.bat` ya lo aplica solo, igual que `ingesta.py`.
+
+Si aparece un conflicto (habitualmente en `data/*.xlsx` por publicaciones simultáneas desde dos PC),
+**no borrar nada**: el `.bat` avisa, continúa y al final te da el comando exacto.
 
 ---
 
@@ -197,9 +216,10 @@ actualizacion_automatica.bat  Doble clic: vigila la carpeta y publica solo (uso 
 vigilar_ingesta.py         El vigilante: detecta archivos nuevos y llama a la ingesta
 ingesta.py / ingesta.bat   Ingesta diaria: ajusta columnas, valida, publica y hace push
 TUTORIAL.md                Guía de uso para usuarios y administradores
-actualizar_panel.bat       Trae los últimos cambios del repositorio (git pull)
+actualizar_panel.bat       Doble clic: ciclo completo datos + publicar (uso diario)
 tools/analisis_ingesta.md  Reporte de columnas de los Excel del día (lo genera ingesta.py)
 tools/ingesta_auto.log     Registro de lo que hizo el vigilante
+tools/actualizar_panel.log Registro de lo que hizo actualizar_panel.bat
 data/                      Excel vigentes + ultima_actualizacion.json
 .streamlit/config.toml     Tema base y configuración del servidor
 .streamlit/secrets.toml    🔒 Local (ignorado por git): modo_admin / modo_publico

@@ -234,6 +234,21 @@ y el botón **⬇️ Descargar Excel** (vista filtrada + gráficos + novedades).
 Los **totales de equipos** no se repiten como tarjetas aquí: están en las tarjetas KPI de arriba
 (esta vista solo los muestra **por fila**).
 
+#### 🏛️ Consolidado por jefatura (arriba de esa tabla)
+La misma pestaña empieza con el **consolidado por jefatura**: una fila por *Jefatura Operaciones
+Regional* (BOGOTA, ANTIOQUIA, COSTA, SUR, OCCIDENTE, ORIENTE, SANTANDERES, CAFETERA, DIRECCIÓN
+GENERAL y COA) con `Sedes · Finalizadas · Reprog. finalizadas · En proceso · Programadas ·
+UPS finalizadas · Avance %`, más una fila **TOTAL** que cuadra con el archivo completo.
+
+Sale **tal cual lo reporta el archivo Campos dashboard** (el panel no lo calcula). Dos detalles:
+
+- **«Finalizadas» cuenta solo `Finalizada`**; `Reprogramada_Finalizada` va en su propia columna.
+  El total reportado es la **suma de las dos** (por eso puedes ver 434 + 1 = 435).
+- Es distinto de las tarjetas de oficinas de arriba: esas sí las revisa el panel con la Data de ejecución.
+
+> 🔎 Para comprobar de un vistazo que los datos del día cuadran, ejecuta
+> `python tools\verificar_datos.py`: muestra estos totales y el consolidado sin abrir el panel.
+
 ### 🔋 UPS: avance y diferencias — solo en el módulo UPS
 Pestaña para comparar **lo que reportó la oficina** (columna «ESTADO UPS» del archivo Campos) con
 **lo que el panel revisa en la Data**. Solo lista las oficinas **con UPS en la Data**:

@@ -421,6 +421,55 @@ VALORES_FILTRO = {
 }
 
 
+def tabla_jefaturas_campos(kpi) -> pd.DataFrame:
+    """CONSOLIDADO por JEFATURA a partir del archivo Campos dashboard.
+
+    Una fila por jefatura (columna «Jefaturas  Operaciones Regional») con lo que reportan
+    sus sedes: Sedes · Finalizadas · Reprog. finalizadas · En proceso · Programadas ·
+    UPS finalizadas · Avance %.
+
+    Antes esta tabla se armaba con las filas de jefatura de la DATA (columna AA en formato
+    «01300-J»). El archivo de ejecución del 25-sept-2026 ya no trae esas filas —su columna AA
+    es numérica—, así que el consolidado se toma del archivo donde las jefaturas sí vienen:
+    Campos dashboard. Los estados NO se derivan: se cuentan tal cual los reporta la oficina,
+    con los mismos criterios que las tarjetas de oficinas. Por eso «Finalizadas» cuenta solo
+    «Finalizada» y «Reprogramada_Finalizada» va en su propia columna.
+    """
+    columnas = ["Jefatura", "Sedes", "Finalizadas", "Reprog. finalizadas", "En proceso",
+                "Programadas", "UPS finalizadas", "Avance %"]
+    if kpi is None or getattr(kpi, "empty", True):
+        return pd.DataFrame(columns=columnas)
+    c_jef = _col(kpi, "Jefaturas  Operaciones Regional", "Jefaturas Operaciones Regional",
+                 "Gerencia Regional", "Gerencia Zonal")
+    if c_jef is None:
+        return pd.DataFrame(columns=columnas)
+    kk = kpi.copy()
+    kk["_JEF"] = kk[c_jef].fillna("").astype(str).str.strip().str.upper()
+    kk = kk[~kk["_JEF"].isin(["", "NAN", "NONE"])]
+    if kk.empty:
+        return pd.DataFrame(columns=columnas)
+    c_est = _col(kk, "Estado de la sede")
+    c_ups = _col(kk, "ESTADO UPS")
+    est = (kk[c_est].fillna("").astype(str).str.strip() if c_est is not None
+           else pd.Series([""] * len(kk), index=kk.index))
+    ups = (kk[c_ups].apply(normalizar_estado_ups) if c_ups is not None
+           else pd.Series([""] * len(kk), index=kk.index))
+    kk = kk.assign(_fin=est.eq("Finalizada").to_numpy(),
+                   _rfin=est.eq("Reprogramada_Finalizada").to_numpy(),
+                   _proc=est.eq("En proceso").to_numpy(),
+                   _prog=est.eq("Programada").to_numpy(),
+                   _upsf=ups.eq("Finalizada").to_numpy())
+    g = (kk.groupby("_JEF", as_index=False)
+         .agg(**{"Sedes": ("_JEF", "size"), "Finalizadas": ("_fin", "sum"),
+                 "Reprog. finalizadas": ("_rfin", "sum"), "En proceso": ("_proc", "sum"),
+                 "Programadas": ("_prog", "sum"), "UPS finalizadas": ("_upsf", "sum")})
+         .rename(columns={"_JEF": "Jefatura"}))
+    # El % incluye la reprogramada finalizada: es el total que reporta la oficina.
+    finalizadas_tot = g["Finalizadas"] + g["Reprog. finalizadas"]
+    g["Avance %"] = (finalizadas_tot / g["Sedes"] * 100).where(g["Sedes"] > 0, 0.0).round(1)
+    return g.sort_values(["Sedes", "Jefatura"], ascending=[False, True]).reset_index(drop=True)
+
+
 def tabla_jefaturas(df: pd.DataFrame, kpi=None) -> pd.DataFrame:
     """Avance por JEFATURA: equipos, mantenimientos hechos, pendientes y % de avance.
 
@@ -466,30 +515,69 @@ def tabla_jefaturas(df: pd.DataFrame, kpi=None) -> pd.DataFrame:
 
 def render_jefaturas(df: pd.DataFrame, kpi=None):
     """Bloque de avance por jefatura, dentro del Resumen por oficina."""
-    t = tabla_jefaturas(df, kpi)
-    st.markdown("#### 🏛️ Avance por jefatura")
+    t = tabla_jefaturas_campos(kpi)
+    desde_campos = not t.empty
+    if not desde_campos:
+        # Respaldo para archivos anteriores, que sí traían las jefaturas en la DATA (columna AA).
+        t = tabla_jefaturas(df, kpi)
+    st.markdown("#### 🏛️ Consolidado por jefatura")
     if t.empty:
-        st.info("Este archivo no trae filas de jefatura (columna AA con formato «01300-J» o "
-                "«01300- MEDELLIN»). Aparecerán aquí en cuanto el archivo las incluya.")
+        st.info("Este archivo no trae la columna «Jefaturas  Operaciones Regional» "
+                "(Campos dashboard) ni filas de jefatura en la columna AA de la Data. "
+                "El consolidado aparecerá cuando el archivo las incluya.")
         return
-    hechas = int((t["Pendientes"] <= 0).sum())
-    c1, c2, c3 = st.columns(3)
-    c1.metric("🏛️ Jefaturas identificadas", f"{len(t)}", border=True,
-              help="Códigos de la columna AA con el patrón «NNNNN-J» (5 dígitos + guion). "
-                   "El nombre se toma de la columna AB del archivo.")
-    c2.metric("✅ Jefaturas completas", f"{hechas} de {len(t)}", border=True,
-              help="Jefaturas cuyo mantenimiento está hecho en todos sus equipos.")
-    c3.metric("⚠️ Equipos pendientes en jefaturas",
-              f"{int(t['Pendientes'].sum()):,}".replace(",", "."), border=True,
-              help="Suma de pendientes de las jefaturas (no incluye sus oficinas).")
+    if desde_campos:
+        tot_sedes = int(t["Sedes"].sum())
+        tot_fin = int(t["Finalizadas"].sum())
+        tot_rfin = int(t["Reprog. finalizadas"].sum())
+        tot_ups = int(t["UPS finalizadas"].sum())
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("🏛️ Jefaturas", f"{len(t)}", border=True,
+                  help="Jefaturas Operaciones Regional que vienen en el archivo Campos dashboard "
+                       "(columna «Jefaturas  Operaciones Regional»).")
+        c2.metric("🏢 Sedes", f"{tot_sedes:,}".replace(",", "."), border=True,
+                  help="Todas las sedes del archivo Campos dashboard (una por fila).")
+        c3.metric("🏁 Sedes finalizadas",
+                  f"{tot_fin + tot_rfin:,}".replace(",", ".") + f" de {tot_sedes}", border=True,
+                  help=f"Lo que reporta el archivo: {tot_fin} «Finalizada» + {tot_rfin} "
+                       "«Reprogramada_Finalizada». Ojo: la tarjeta «🏁 Oficinas reportadas como "
+                       f"finalizadas» del encabezado cuenta solo «Finalizada» ({tot_fin}), por eso "
+                       "allí verás ese número y aquí la suma.")
+        c4.metric("🔋 UPS finalizadas", f"{tot_ups:,}".replace(",", "."), border=True,
+                  help="Sedes cuya columna AP «ESTADO UPS» dice Finalizado. Se muestra tal cual "
+                       "lo reporta la oficina.")
+        st.caption(f"**Finalizadas**: {tot_fin} «Finalizada» + {tot_rfin} «Reprogramada_Finalizada» "
+                   f"= **{tot_fin + tot_rfin}** · **UPS finalizadas**: {tot_ups}. "
+                   "La columna **Avance %** usa ese total (finalizadas ÷ sedes).")
+    else:
+        hechas = int((t["Pendientes"] <= 0).sum())
+        c1, c2, c3 = st.columns(3)
+        c1.metric("🏛️ Jefaturas identificadas", f"{len(t)}", border=True,
+                  help="Códigos de la columna AA con el patrón «NNNNN-J» (5 dígitos + guion). "
+                       "El nombre se toma de la columna AB del archivo.")
+        c2.metric("✅ Jefaturas completas", f"{hechas} de {len(t)}", border=True,
+                  help="Jefaturas cuyo mantenimiento está hecho en todos sus equipos.")
+        c3.metric("⚠️ Equipos pendientes en jefaturas",
+                  f"{int(t['Pendientes'].sum()):,}".replace(",", "."), border=True,
+                  help="Suma de pendientes de las jefaturas (no incluye sus oficinas).")
     corregidas = df.attrs.get("jefaturas_corregidas") or []
     if corregidas:
         st.caption("✏️ Se corrigió la escritura de: "
                    + " · ".join(f"`{c}`" for c in corregidas)
                    + " (se muestra corregido; el archivo de origen no se modifica).")
 
+    if desde_campos:
+        # Fila de TOTAL: deja a la vista que el consolidado cuadra con el archivo completo.
+        t = pd.concat([t, pd.DataFrame([{
+            "Jefatura": "TOTAL", "Sedes": tot_sedes, "Finalizadas": tot_fin,
+            "Reprog. finalizadas": tot_rfin,
+            "En proceso": int(t["En proceso"].sum()),
+            "Programadas": int(t["Programadas"].sum()),
+            "UPS finalizadas": tot_ups,
+            "Avance %": round((tot_fin + tot_rfin) / tot_sedes * 100, 1) if tot_sedes else 0.0,
+        }])], ignore_index=True)
     st.dataframe(
-        t, hide_index=True, width="stretch", height=min(460, 40 + 35 * len(t)),
+        t, hide_index=True, width="stretch", height=min(560, 40 + 35 * len(t)),
         column_config={
             "Jefatura": st.column_config.TextColumn("Jefatura", width="medium"),
             "Código (columna AA)": st.column_config.TextColumn(
@@ -497,18 +585,40 @@ def render_jefaturas(df: pd.DataFrame, kpi=None):
                 help="Así viene el código en el archivo (p. ej. «01300-J»)."),
             "Regional (SBAN)": st.column_config.TextColumn("Regional (SBAN)", width="small"),
             "Regional": st.column_config.TextColumn("Regional", width="small"),
+            "Sedes": st.column_config.NumberColumn(
+                "Sedes", format="%d", width="small",
+                help="Sedes (filas) que reporta esa jefatura en el archivo."),
             "Equipos": st.column_config.NumberColumn("Equipos", format="%d", width="small"),
             "Realizados": st.column_config.NumberColumn("Realizados", format="%d", width="small"),
             "Pendientes": st.column_config.NumberColumn("Pendientes", format="%d", width="small"),
+            "Finalizadas": st.column_config.NumberColumn(
+                "Finalizadas", format="%d", width="small",
+                help="Sedes con «Finalizada» en la columna «Estado de la sede»."),
+            "Reprog. finalizadas": st.column_config.NumberColumn(
+                "Reprog. finalizadas", format="%d", width="small",
+                help="Sedes con «Reprogramada_Finalizada». Se cuentan aparte, igual que en las "
+                     "tarjetas del encabezado; la suma de las dos es el total finalizado."),
+            "En proceso": st.column_config.NumberColumn("En proceso", format="%d", width="small"),
+            "Programadas": st.column_config.NumberColumn("Programadas", format="%d", width="small"),
+            "UPS finalizadas": st.column_config.NumberColumn(
+                "UPS finalizadas", format="%d", width="small",
+                help="Sedes con «Finalizado» en la columna AP «ESTADO UPS»."),
             "Avance %": st.column_config.ProgressColumn(
-                "Avance %", min_value=0, max_value=100, format="%.0f%%", width="small"),
+                "Avance %", min_value=0, max_value=100, format="%.0f%%", width="small",
+                help="Sedes finalizadas (incluida la reprogramada finalizada) ÷ sedes."),
             "Reportado (Campos)": st.column_config.TextColumn(
                 "Reportado (Campos)", width="small",
                 help="Estado que esa sede reportó en el archivo Campos dashboard."),
         },
     )
-    st.caption("Solo equipos propios de cada jefatura (las oficinas que dependen de ellas "
-               "se ven en la tabla de abajo). El nombre es el de la columna AB del archivo.")
+    if desde_campos:
+        st.caption("Consolidado **tal cual lo reporta el archivo Campos dashboard**: cada fila es "
+                   "una jefatura y sus cifras son la suma de sus sedes. La fila **TOTAL** cuadra "
+                   "con el archivo completo. El avance de EQUIPOS por jefatura (MT3) se ve en el "
+                   "resumen por oficina de abajo: la Data de ejecución ya no trae filas de jefatura.")
+    else:
+        st.caption("Solo equipos propios de cada jefatura (las oficinas que dependen de ellas "
+                   "se ven en la tabla de abajo). El nombre es el de la columna AB del archivo.")
 
 
 def _quitar_filtro(clave: str):
@@ -3618,11 +3728,12 @@ def main():
 
     with tab_res:
         # Dos niveles, siempre visibles (Opción A: sin expanders escondidos):
-        #   1) Jefaturas (columna AA: «01300- MEDELLIN») — equipos propios de cada jefatura
+        #   1) Jefaturas — CONSOLIDADO de sedes y UPS finalizadas (Campos dashboard)
         #   2) Oficinas (una fila por SBAN) — el detalle sede por sede
-        st.caption("Esta pestaña tiene **dos niveles**: arriba el avance de las **jefaturas** "
-                   "(sus propios equipos) y abajo el **resumen por oficina**, sede por sede. "
-                   "Todo está a la vista: no hay bloques que se puedan perder.")
+        st.caption("Esta pestaña tiene **dos niveles**: arriba el **consolidado por jefatura** "
+                   "(sedes y UPS finalizadas, tal cual las reporta el archivo) y abajo el "
+                   "**resumen por oficina**, sede por sede. Todo está a la vista: no hay bloques "
+                   "escondidos.")
         render_jefaturas(df, kpi_campos)
         st.markdown("---")
         # Resumen por oficina (Total / Subsanados / Pendientes / % Avance / Novedades)

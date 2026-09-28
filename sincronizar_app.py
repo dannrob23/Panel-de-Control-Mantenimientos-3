@@ -35,6 +35,8 @@ HERRAMIENTAS = {
     "ingesta.bat": "tools/ingesta_raiz.bat",
     "vigilar_ingesta.py": "tools/vigilar_ingesta_raiz.py",
     "actualizacion_automatica.bat": "tools/actualizacion_automatica_raiz.bat",
+    "actualizar_panel.bat": "tools/actualizar_panel_raiz.bat",
+    "tools/verificar_datos.py": "tools/verificar_datos_raiz.py",
 }
 
 

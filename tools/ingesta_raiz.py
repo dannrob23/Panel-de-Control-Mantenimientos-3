@@ -126,7 +126,11 @@ COLUMNAS_CONSERVAR = {
         # El SBAN del archivo Campos se escribe como «SBAN» aunque en el original venga
         # con el encabezado dañado: el panel lo lee por NOMBRE.
         "Dashboard_KPI": ["SBAN", "Nombre Oficina", "Fecha Inicio", "Fecha Fin",
-                          "Estado de la sede", "ESTADO UPS", "OBSERVACIONES", "UPS"],
+                          "Estado de la sede", "ESTADO UPS", "OBSERVACIONES", "UPS",
+                          # [CLAVE] Consolidado por jefatura: «Jefaturas  Operaciones Regional»
+                          # agrupa las sedes por jefatura y «Tipo» distingue Oficina / Jefatura
+                          # / Regional / DG. Sin estas dos columnas el consolidado sale vacio.
+                          "Tipo", "Jefaturas  Operaciones Regional"],
         "Novedades Equipos": ["SBAN", "SBAN PCT", "Fecha", "Serial ",         # [CLAVE SBAN,
                               "Oficina", "Estado", "Facturable",              #  Fecha, Categoria]
                               "Nombre Oficina", "Departamento", "ALIADO",

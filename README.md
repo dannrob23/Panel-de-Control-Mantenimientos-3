@@ -220,6 +220,7 @@ actualizar_panel.bat       Doble clic: ciclo completo datos + publicar (uso diar
 tools/analisis_ingesta.md  Reporte de columnas de los Excel del día (lo genera ingesta.py)
 tools/ingesta_auto.log     Registro de lo que hizo el vigilante
 tools/actualizar_panel.log Registro de lo que hizo actualizar_panel.bat
+tools/verificar_datos.py   Verifica totales y consolidado por jefatura (sin abrir el panel)
 data/                      Excel vigentes + ultima_actualizacion.json
 .streamlit/config.toml     Tema base y configuración del servidor
 .streamlit/secrets.toml    🔒 Local (ignorado por git): modo_admin / modo_publico
@@ -255,6 +256,14 @@ raíz del proyecto antes de publicar, para que la nube reciba exactamente la ver
   (808 de la Data / 824 filas de Campos / 805 de UPS), lo que hacía ver cifras incoherentes.
 - **% de avance:** un único indicador, como delta de la tarjeta de MT realizados (antes se repetía en una
   barra de progreso aparte).
+- **Consolidado por jefatura = archivo Campos dashboard.** La columna `Jefaturas  Operaciones Regional`
+  agrupa las sedes por jefatura y `Tipo` distingue Oficina / Jefatura / Regional / DG. La **Data de
+  ejecución ya no trae filas de jefatura** (su columna AA es numérica), así que el consolidado se calcula
+  con `tabla_jefaturas_campos()` desde Campos; `tabla_jefaturas()` queda solo como respaldo para archivos
+  anteriores. `Finalizada` y `Reprogramada_Finalizada` se muestran en columnas separadas (el total
+  reportado es su suma, y ese total es el que usa la columna `Avance %`).
+- **Verificación sin abrir el panel:** `python tools\verificar_datos.py` imprime los totales de control
+  (sedes, finalizadas, UPS finalizadas) y el consolidado por jefatura, y avisa si algo no cuadra.
 - Al cambiar de módulo se reinician los filtros que podrían dejar la vista vacía.
 
 ---

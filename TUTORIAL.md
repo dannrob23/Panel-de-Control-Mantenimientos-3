@@ -369,6 +369,14 @@ falta pedir ayuda** para la actualización normal.
 | Regenerar los datos sin publicar (probar) | `actualizar_panel.bat local` |
 | Ver la ayuda | `actualizar_panel.bat ayuda` |
 
+**¿Y si estás en otro computador?** Ese equipo hay que prepararlo **una sola vez**: descarga
+`preparar_equipo_nuevo_raiz.bat` desde el repositorio (carpeta `tools/`), haz doble clic y sigue las
+instrucciones. Deja un acceso directo **Actualizar Panel MT3** en el Escritorio y, a partir de ahí, ese
+PC se usa igual que el habitual. El detalle está en el README, sección *Actualizar el panel*.
+
+> 🔒 Recuerda: subir los Excel **por la página del panel no publica nada**. El panel de la nube es
+> solo de consulta; la data entra por la ingesta de un PC.
+
 ---
 
 ## 11. Problemas comunes

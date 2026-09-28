@@ -206,6 +206,28 @@ Streamlit Cloud se redespliega solo (1-2 min). Lo que hizo queda en `tools\actua
 Si aparece un conflicto (habitualmente en `data/*.xlsx` por publicaciones simultáneas desde dos PC),
 **no borrar nada**: el `.bat` avisa, continúa y al final te da el comando exacto.
 
+### 🖥️ Desde otro PC (preparar ese equipo, una sola vez)
+
+Si tienes que subir la data desde un computador que **no** es el habitual, ese equipo necesita
+prepararse **una vez**:
+
+1. Descarga el preparador desde el repositorio: `tools/preparar_equipo_nuevo_raiz.bat`
+   (en GitHub, botón *Download raw file*).
+2. Doble clic en el archivo descargado. El preparador revisa Python y Git (ofrece instalarlos con
+   `winget`), clona el repositorio, copia los scripts, instala `pandas`/`numpy`/`openpyxl`, autentica
+   con GitHub y deja un acceso directo **Actualizar Panel MT3** en el Escritorio.
+3. De ahí en adelante ese PC se usa igual que el habitual: copiar los Excel del día en
+   `Ingesta de datos diaria` y doble clic en **Actualizar Panel MT3**.
+
+Instala el proyecto en `%USERPROFILE%\Documents\PROYECTOS\CONTROL INVENTARIO MANTENIMIENTOS 3` (puedes
+indicar otra ruta). Se puede volver a ejecutar sin problema: si el repositorio ya está, solo trae los
+últimos cambios. Requisitos: Windows, conexión a internet y una cuenta con acceso al repositorio
+(el primer *fetch* pide autenticación una sola vez).
+
+> ⚠️ El panel web **no** sirve para publicar: el *uploader* está desactivado en la nube a propósito
+> (`modo_admin`) y, aunque se activara, solo guardaría los archivos en el servidor para esa sesión
+> —el disco de Streamlit Cloud es efímero—. Para publicar hay que ejecutar la ingesta desde un PC.
+
 ---
 
 ## 🧩 Estructura del repositorio

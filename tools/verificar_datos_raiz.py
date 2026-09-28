@@ -13,19 +13,29 @@ si el consolidado y los totales coinciden con el archivo, los datos estan bien.
 """
 import os
 import sys
+import logging
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 os.environ["INGESTA_SIN_APP"] = "1"  # importar app.py sin arrancar Streamlit
+# app.py importa Streamlit, que escupe avisos de "no runtime" en modo consola.
+logging.getLogger("streamlit").setLevel(logging.CRITICAL)
 for _f in (sys.stdout, sys.stderr):
     try:
         _f.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
 
+import contextlib  # noqa: E402
+import io  # noqa: E402
 import pandas as pd  # noqa: E402
-import app  # noqa: E402
+
+# `app.py` importa Streamlit, que en modo consola escupe avisos de "no runtime".
+# Se silencian durante el import para que la salida quede limpia y legible.
+_buf = io.StringIO()
+with contextlib.redirect_stderr(_buf):
+    import app  # noqa: E402
 
 
 def buscar(nombre: str):

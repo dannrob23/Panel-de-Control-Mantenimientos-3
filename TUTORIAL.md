@@ -215,6 +215,18 @@ Esta pestaña responde a tres preguntas: **¿cuánto llevamos?**, **¿quién va 
 - **Cómo leerla:** eje izquierdo = MT3 del día · eje derecho = acumulado. El subtítulo indica el total
   y el último día con registros.
 
+#### 🏢 Tendencia de Oficinas Intervenidas (nuevas por día)
+- **Va justo debajo de la anterior** y es su gemela, pero cuenta **OFICINAS**, no equipos.
+- **Qué muestra:** dos series iguales que arriba:
+  - **Área celeste con puntos** = oficinas que **empezaron ese día** (cada oficina cuenta desde su
+    **primer** mantenimiento, no desde cada equipo que se le hizo).
+  - **Línea punteada verde** = **acumulado** de oficinas intervenidas (eje derecho).
+- **El acumulado termina en el mismo número que la tarjeta 🏢 Oficinas intervenidas** de arriba: por
+  eso sirve como control cruzado (con los datos del 30-sept, 521 oficinas).
+- **No es lo mismo que la tendencia de equipos:** si un día se le hicieron 20 mantenimientos a una sola
+  oficina, la de equipos sube 20 y esta sube 1. La de equipos mide *trabajo*; esta mide *cobertura de sedes*.
+- **Para qué sirve:** ver a qué ritmo se van sumando sedes nuevas al plan.
+
 #### 🗺️ Mapa de calor (Regional × Estado de la sede)
 - **Qué muestra:** una cuadrícula:
   - **Filas** = **Regional** (más una fila **SIN REGIONAL**, que agrupa bodegas/stock sin regional asignada).

@@ -2703,6 +2703,65 @@ def grafico_tendencia(datos: pd.DataFrame):
     return fig
 
 
+def grafico_tendencia_oficinas(datos: pd.DataFrame):
+    """Tendencia diaria y acumulada de OFICINAS INTERVENIDAS (gemela de la de equipos).
+
+    Una oficina cuenta como **intervenida desde su PRIMER mantenimiento** (MT3): el punto de
+    cada día son las sedes que empezaron ese día y la línea punteada es el acumulado, que
+    termina en el total de oficinas intervenidas de la tarjeta destacada.
+
+    Mide OFICINAS, no equipos: `grafico_tendencia` cuenta cada MT3 (un equipo), esta cuenta
+    cada sede (una oficina), aunque ese día se le hayan hecho 20 mantenimientos.
+    """
+    t = tema_actual()
+    if "Fecha de mantenimiento 3" not in datos.columns or "_SBAN" not in datos.columns:
+        return None
+    d = datos[datos["_mt"]].copy()
+    d["_f"] = pd.to_datetime(d["Fecha de mantenimiento 3"], errors="coerce")
+    d = d[d["_f"].notna()]
+    if d.empty:
+        return None
+    # Primera fecha de MT3 de cada oficina = el día en que la oficina quedó intervenida.
+    primera = d.groupby("_SBAN")["_f"].min()
+    serie = primera.dt.date.value_counts().sort_index()
+    acum = serie.cumsum()
+    x = [f"{f:%d/%m}" for f in serie.index]
+    cel = str(t["celeste"]).lstrip("#")
+    try:
+        rr, gg, bb = int(cel[0:2], 16), int(cel[2:4], 16), int(cel[4:6], 16)
+        relleno = f"rgba({rr},{gg},{bb},0.15)"
+    except (ValueError, IndexError):
+        relleno = "rgba(34,211,238,0.15)"
+    fig = go.Figure()
+    fig.add_scatter(x=x, y=serie.values, name="Oficinas que empiezan ese día",
+                    mode="lines+markers+text",
+                    line=dict(color=t["celeste"], width=2.5), marker=dict(size=7),
+                    text=[str(int(v)) for v in serie.values], textposition="top center",
+                    textfont=dict(size=10, color=t["ink"]), cliponaxis=False,
+                    fill="tozeroy", fillcolor=relleno,
+                    hovertemplate="%{x}<br>Oficinas que empezaron: %{y}<extra></extra>")
+    fig.add_scatter(x=x, y=acum.values, name="Oficinas intervenidas (acumulado)", mode="lines",
+                    line=dict(color=t["verde"], width=2, dash="dot"), yaxis="y2",
+                    hovertemplate="%{x}<br>Acumulado: %{y} oficinas<extra></extra>")
+    total_d = int(serie.sum())
+    fig.update_layout(
+        title=dict(text="<b>Tendencia de Oficinas Intervenidas (nuevas por día)</b>"
+                        f"<br><span style='font-size:11px'>Total: {total_d} oficinas · "
+                        f"último día: {x[-1]} ({int(serie.iloc[-1])})</span>",
+                   font=dict(size=15, color=t["ink"]), x=0.02),
+        height=360, margin=dict(l=10, r=10, t=65, b=10),
+        xaxis=dict(title="", gridcolor=t["grid"], zeroline=False,
+                   tickfont=dict(color=t["muted"])),
+        yaxis=dict(title="Oficinas nuevas por día", rangemode="tozero", gridcolor=t["grid"],
+                   tickfont=dict(color=t["muted"])),
+        yaxis2=dict(title="Acumulado", overlaying="y", side="right", showgrid=False,
+                    tickfont=dict(color=t["muted"])),
+        legend=dict(orientation="h", y=1.02, x=0, font=dict(color=t["muted"])),
+        **plotly_base(),
+    )
+    return fig
+
+
 def grafico_mini_componentes(df: pd.DataFrame, seleccion: list, f_attr: str,
                              click_sban=None):
     """Barras de cobertura de oficinas con MT3 por componente (solo visual)."""
@@ -3783,6 +3842,18 @@ def main():
                 st.plotly_chart(fig_t, width="stretch", config=cfg_chart)
             else:
                 st.info("Sin fechas de MT3 para la selección actual.")
+
+        # --- Tendencia de OFICINAS INTERVENIDAS: cuántas sedes nuevas entran cada día.
+        #     Gemela de la de equipos: cada oficina cuenta desde su PRIMER MT3, así el
+        #     acumulado termina en el total de oficinas intervenidas de la tarjeta. ---
+        fig_to = grafico_tendencia_oficinas(filtrado)
+        if fig_to is not None:
+            st.plotly_chart(fig_to, width="stretch", config=cfg_chart)
+            st.caption("Cada oficina cuenta desde su **primer** mantenimiento: la línea punteada "
+                       "es el acumulado y termina en el total de oficinas intervenidas. "
+                       "Es distinto de la tendencia de arriba, que cuenta **equipos** (MT3).")
+        else:
+            st.info("Sin fechas de MT3 para la tendencia de oficinas.")
 
         # --- Mapa de calor: un único control (el color siempre es el avance) ---
         st.markdown("---")

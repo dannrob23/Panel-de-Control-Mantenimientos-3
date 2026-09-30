@@ -35,8 +35,9 @@ novedades por sede y fecha/hora de última actualización.
   (por ejemplo, sede marcada `Finalizado` con UPS sin MT3). Descarga CSV/Excel.
 - **Novedades de las oficinas** en una pestaña propia (hoja `Novedades Equipos`), con gráfico por categoría,
   filtros de categoría y rango de fechas, y exportación; no se aíslan por componente porque son transversales.
-- **Gráficos (Plotly)**: dona, taquímetro de avance, ranking de sedes con más pendientes (clic para filtrar),
-  tendencia diaria y mapa de calor Regional × Estado.
+- **Gráficos (Plotly)**: **dos donas gemelas** —avance de **equipos** (MT3, lo que revisa el panel) y
+  avance de **oficinas** reportado en Campos dashboard—, ranking de sedes con más pendientes (clic para
+  filtrar), tendencia diaria y mapa de calor Regional × Estado.
 - **Resumen por oficina** con filtros propios, fila de totales y **descarga a Excel** (vista + gráficos + novedades).
 - **Gestión de novedades**: tabla editable (las anotaciones persisten) y exportación CSV/Excel.
 - **Filtros** de oficina (multiselección con búsqueda), "solo pendientes", filtro por clic en el ranking,

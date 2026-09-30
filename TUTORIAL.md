@@ -188,6 +188,16 @@ Esta pestaña responde a tres preguntas: **¿cuánto llevamos?**, **¿quién va 
 - **Para qué sirve:** es la foto de un vistazo del avance. Si la porción verde crece, el plan avanza.
 - **Cómo leerla:** pasa el mouse por cada porción para ver el conteo exacto y el porcentaje.
 
+#### 🍩 Dona — "Avance de Oficinas (reportado)"
+- **Va justo al lado de la anterior** y es su gemela en forma y colores, pero mide **OFICINAS**, no equipos.
+- **Qué muestra:** verde = oficinas que la propia oficina marcó como **Finalizada** en el archivo Campos
+  dashboard; naranja = las que faltan.
+- **El número del centro** es `finalizadas ÷ total de oficinas del archivo` (por ejemplo 475 de 824 = 57,6 %).
+- **No es lo mismo que la dona de equipos.** Una oficina puede estar `Finalizada` aunque le falten equipos,
+  y al revés. Por eso los dos porcentajes no coinciden —52 % de equipos frente a 57 % de oficinas—: cada
+  dona responde a una pregunta distinta. La de equipos: *¿cuánto trabajo llevamos?* La de oficinas:
+  *¿cuántas sedes ya se declararon terminadas?*
+
 #### 🏆 Ranking de sedes (pendientes)
 - **Qué muestra:** barras horizontales con las sedes que tienen **más pendientes**. Puedes elegir
   mostrar 5, 10, 12, 15, 20 o 25.

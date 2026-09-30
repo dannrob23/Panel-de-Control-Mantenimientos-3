@@ -953,6 +953,11 @@ PATRON_JEFATURA = re.compile(r"^\s*(\d{5})\s*-\s*(.*?)\s*$")
 # Se corrige SOLO al mostrar: no se toca el dato de origen.
 CORRECCIONES_JEFATURA = {
     "JEFATUTA": "JEFATURA",     # 'JEFATUTA SINCELEJO' -> 'JEFATURA SINCELEJO'
+    # La MISMA sede escrita de dos formas en la columna AA del archivo del 30-sept:
+    #   '01600-BQUILLA' (2 equipos) y '01600- BAQUILLA' (5 equipos) -> las dos son
+    #   BARRANQUILLA. Sin unirlas, el filtro «Jefatura» las mostraba como dos sedes.
+    "BQUILLA": "BARRANQUILLA",
+    "BAQUILLA": "BARRANQUILLA",
 }
 
 
@@ -1053,8 +1058,12 @@ def _cargar_y_preparar(path: str, mtime: float) -> pd.DataFrame:
     df["_es_jefatura"] = _es_jef
     df["_nivel"] = np.where(_es_jef, "Jefatura", "Oficina")
     # Aviso: nombres que venían con error de escritura y se corrigieron al mostrar.
-    _corregidos = sorted({str(o).strip() for o in df.loc[_es_jef, "Oficina"]
-                          if normalizar_nombre_jefatura(o) != str(o).strip()})
+    # Se revisan las DOS fuentes del nombre: la columna AB («Oficina») y el sufijo de la
+    # columna AA («01600- BAQUILLA»), que es el que manda cuando trae el nombre.
+    _originales = {str(o).strip() for o in df.loc[_es_jef, "Oficina"]}
+    _originales |= {str(o).strip() for o in _suf[_es_jef]}
+    _corregidos = sorted({o for o in _originales
+                          if o and o.lower() != "nan" and normalizar_nombre_jefatura(o) != o})
     df.attrs["jefaturas_corregidas"] = _corregidos
 
     # --- SBAN: código de oficina (visible y buscable, formato 5 dígitos).

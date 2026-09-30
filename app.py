@@ -2589,6 +2589,72 @@ def grafico_dona(realizados: int, pendientes: int):
     return fig
 
 
+def grafico_dona_oficinas(finalizadas: int, total: int):
+    """Dona del avance por OFICINAS (lo que reporta el archivo Campos dashboard).
+
+    Es gemela de `grafico_dona` (que mide EQUIPOS): misma forma, mismos colores y mismo
+    tamaño para poder leerlas juntas. La diferencia está en lo que miden y en el texto:
+
+      · `grafico_dona`          -> equipos con MT3 hecho (lo revisa el panel en la Data).
+      · `grafico_dona_oficinas` -> oficinas marcadas como finalizadas por la propia oficina
+        en la columna «Estado de la sede» de Campos dashboard.
+
+    Los dos porcentajes NO tienen por qué coincidir: son cosas distintas.
+    """
+    t = tema_actual()
+    pendientes = max(int(total) - int(finalizadas), 0)
+    pct = (finalizadas / total * 100) if total else 0.0
+    fig = go.Figure(go.Pie(
+        labels=["🏁 Oficinas finalizadas", "⏳ Oficinas pendientes"],
+        values=[int(finalizadas), pendientes],
+        hole=0.68,
+        marker=dict(colors=[t["verde"], t["pend"]], line=dict(color=t["card"], width=3)),
+        textinfo="none",
+        hovertemplate="<b>%{label}</b><br>%{value:,} oficinas (%{percent})<extra></extra>",
+    ))
+    fig.update_layout(
+        title=dict(text="<b>Avance de Oficinas (reportado)</b>",
+                   font=dict(size=15, color=t["ink"]), x=0.02),
+        annotations=[dict(
+            text=(f"<span style='font-size:28px;font-weight:700;color:{t['ink']}'>{pct:.1f}%</span>"
+                  f"<br><span style='font-size:11px;letter-spacing:.5px;color:{t['muted']}'>AVANCE OFICINAS</span>"),
+            x=0.5, y=0.5, showarrow=False, align="center")],
+        margin=dict(l=15, r=15, t=45, b=10),
+        height=360,
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.08, xanchor="center", x=0.5,
+                    font=dict(color=t["muted"])),
+        **plotly_base(),
+    )
+    return fig
+
+
+def render_donas_avance(filtrado: pd.DataFrame, kpi_campos=None, seleccion=None,
+                        click_sban=None, cfg=None):
+    """Pinta las DOS donas de avance lado a lado.
+
+    Izquierda: EQUIPOS (consecutivo MT3 en la Data, según los filtros activos).
+    Derecha  : OFICINAS (reportadas como finalizadas en Campos dashboard).
+
+    Van juntas a propósito: miden cosas distintas y sus porcentajes no coinciden, así que
+    verlas juntas evita confundir «avance de equipos» con «avance de oficinas».
+    """
+    izq, der = st.columns(2)
+    with izq:
+        st.plotly_chart(
+            grafico_dona(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
+            width="stretch", config=cfg)
+    with der:
+        datos = oficinas_campos(kpi_campos, seleccion, click_sban)
+        total = len(datos["universo"])
+        if total:
+            st.plotly_chart(
+                grafico_dona_oficinas(datos["finalizadas_n"], total),
+                width="stretch", config=cfg)
+        else:
+            st.info("Sin oficinas en el archivo Campos dashboard para mostrar este avance.")
+
+
 def grafico_tendencia(datos: pd.DataFrame):
     """Tendencia diaria y acumulada de MT3 (usa Fecha de mantenimiento 3)."""
     t = tema_actual()
@@ -2750,7 +2816,7 @@ def grafico_sparkline_tendencia(datos: pd.DataFrame):
 
 
 def render_vista_ejecutiva(filtrado: pd.DataFrame, df: pd.DataFrame, seleccion: list,
-                           f_attr: str, click_sban=None):
+                           f_attr: str, click_sban=None, kpi_campos=None):
     """Vista solo de KPIs visuales: 5 gráficos, sin tablas ni cifras duras de KPIs."""
     st.markdown("#### 🎯 Vista ejecutiva · indicadores visuales")
     cfg = {"displaylogo": False, "modeBarButtonsToRemove": ["lasso2d", "select2d"]}
@@ -2760,8 +2826,8 @@ def render_vista_ejecutiva(filtrado: pd.DataFrame, df: pd.DataFrame, seleccion: 
     realizados = int(filtrado["_mt"].sum())
     pendientes = int(filtrado["_pendiente"].sum())
 
-    # Un solo gráfico de avance: la dona (el taquímetro mostraba la misma cifra).
-    st.plotly_chart(grafico_dona(realizados, pendientes), width="stretch", config=cfg)
+    # Las dos donas de avance: EQUIPOS (Data) y OFICINAS (Campos dashboard).
+    render_donas_avance(filtrado, kpi_campos, seleccion, click_sban, cfg)
 
     f2a, f2b = st.columns([1.4, 1])
     with f2a:
@@ -3622,7 +3688,7 @@ def main():
         # numerador de "Oficinas intervenidas" no quede en 0.
         tarjetas_destacadas(base_oficina)
         render_vista_ejecutiva(filtrado, df, seleccion, f_attr,
-                               st.session_state.get("click_sban"))
+                               st.session_state.get("click_sban"), kpi_campos)
         st.markdown("---")
         st.caption(f"Vista Ejecutiva · Módulo {modulo} · 1 fila = 1 elemento (Serial único).")
         return
@@ -3679,10 +3745,10 @@ def main():
     tab_nov_ofi, tab_nov = tabs[i], tabs[i + 1]
 
     with tab_graf:
-        # Un solo gráfico de avance: la dona (el taquímetro repetía la misma cifra).
-        st.plotly_chart(
-            grafico_dona(int(filtrado["_mt"].sum()), int(filtrado["_pendiente"].sum())),
-            width="stretch", config=cfg_chart)
+        # Las DOS donas lado a lado: equipos (lo que revisa el panel en la Data) y
+        # oficinas (lo que reporta Campos dashboard). Miden cosas distintas a propósito.
+        render_donas_avance(filtrado, kpi_campos, seleccion,
+                            st.session_state.get("click_sban"), cfg_chart)
 
         fila2a, fila2b = st.columns([1, 1.3])
         with fila2a:

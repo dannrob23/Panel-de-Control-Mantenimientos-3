@@ -1,17 +1,17 @@
 {
-  "fecha_hora": "2026-09-30 14:57:46",
+  "fecha_hora": "2026-09-30 15:02:51",
   "organizacion": "BANCO AGRARIO / COLSOF - Mantenimiento Preventivo 3",
   "anonimizado": true,
   "archivos": {
     "Data_actual.xlsx": {
       "origen": "30 sept.xlsx",
-      "sha256": "8c306045e7dff94d9c5ecf701f822b76a426d86a311ca8238abd383b677b3324",
-      "bytes": 1830105
+      "sha256": "c8cff3d9e902f104bf0cf3f8130d217025e605b9213c2e048b36e5c23b8dc52f",
+      "bytes": 1830104
     },
     "Campos_actual.xlsx": {
       "origen": "Campos dashborad 30 sept.xlsx",
-      "sha256": "f0b71abe61dbd7140b4b3cc61a569947499d805af29093ea7ae90e42b8d2b092",
-      "bytes": 65814
+      "sha256": "77c58ebbfa4a43ece5cfea9ca1526184b064fd2401d75116bf906988106fb452",
+      "bytes": 65812
     },
     "Cronograma_actual.xlsx": {
       "origen": "",

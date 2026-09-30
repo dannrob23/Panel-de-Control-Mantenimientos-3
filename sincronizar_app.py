@@ -38,6 +38,7 @@ HERRAMIENTAS = {
     "actualizar_panel.bat": "tools/actualizar_panel_raiz.bat",
     "Preparar_Equipo_Nuevo.bat": "tools/preparar_equipo_nuevo_raiz.bat",
     "tools/verificar_datos.py": "tools/verificar_datos_raiz.py",
+    "tools/revisar_jefaturas.py": "tools/revisar_jefaturas_raiz.py",
 }
 
 

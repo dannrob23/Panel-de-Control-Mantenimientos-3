@@ -186,9 +186,10 @@ el script se detiene con un mensaje claro en vez de romper el panel.
 **Doble clic en `actualizar_panel.bat`**: hace todo el ciclo en un solo paso.
 
 1. Revisa que haya Excel en `Ingesta de datos diaria` y te dice cuál es el más reciente.
-2. Trae los últimos cambios de GitHub (repo `deploy_panel`, rama `main`).
-3. Ejecuta la ingesta: ajusta columnas, valida y anonimiza.
-4. Regenera `data/` y `deploy_panel/data/`, hace commit y push.
+2. **Revisa la columna AA** (sedes-jefatura) y avisa si hay nombres mal escritos o duplicados.
+3. Trae los últimos cambios de GitHub (repo `deploy_panel`, rama `main`).
+4. Ejecuta la ingesta: ajusta columnas, valida y anonimiza.
+5. Regenera `data/` y `deploy_panel/data/`, hace commit y push.
 
 Al terminar te muestra el último commit publicado y si algo quedó sin subir (la palabra `ahead`).
 Streamlit Cloud se redespliega solo (1-2 min). Lo que hizo queda en `tools\actualizar_panel.log`.
@@ -196,9 +197,26 @@ Streamlit Cloud se redespliega solo (1-2 min). Lo que hizo queda en `tools\actua
 | Modo | Qué hace |
 |---|---|
 | `actualizar_panel.bat` | Ciclo completo: datos + publicación (uso diario) |
+| `actualizar_panel.bat revisar` | Solo revisar la columna AA (jefaturas), sin publicar |
 | `actualizar_panel.bat pull` | Solo traer los cambios de GitHub a este PC |
 | `actualizar_panel.bat local` | Regenerar los datos **sin** publicar (para probar) |
 | `actualizar_panel.bat ayuda` | Ver la ayuda en pantalla |
+
+### 🔎 Qué revisa la columna AA (sedes-jefatura)
+
+En la columna AA del Excel de ejecución vienen las **sedes-jefatura** con el formato
+`NNNNN-NOMBRE` (por ejemplo `01600-BQUILLA`). El paso 2 del `.bat` las revisa antes de publicar y
+avisa de:
+
+- **la misma sede escrita de dos formas** (`BQUILLA` y `BAQUILLA` son Barranquilla): el panel las
+  une al mostrarlas, pero el Excel de origen es el que conviene corregir;
+- **nombres que no son ninguna sede conocida** (`VILLAO`, `BMANGA`), indicando a cuál se parecen;
+- **que la columna AA no traiga ninguna fila de jefatura** — como pasó con el archivo del 28-sept,
+  que dejaba vacío el filtro «Jefatura» del panel.
+
+Los avisos **no** detienen la publicación: se muestran, el `.bat` espera un Enter y continúa. La
+lista de sedes conocidas vive en `tools/revisar_jefaturas.py` (`SEDES_JEFATURA`): si aparece una
+sede nueva de verdad, se agrega ahí y deja de avisar.
 
 > 🔐 En este equipo `git` necesita `http.sslBackend=openssl` para conectar con GitHub (`schannel`
 > falla con `SEC_E_NO_CREDENTIALS`); el `.bat` ya lo aplica solo, igual que `ingesta.py`.
@@ -243,6 +261,7 @@ tools/analisis_ingesta.md  Reporte de columnas de los Excel del día (lo genera 
 tools/ingesta_auto.log     Registro de lo que hizo el vigilante
 tools/actualizar_panel.log Registro de lo que hizo actualizar_panel.bat
 tools/verificar_datos.py   Verifica totales y consolidado por jefatura (sin abrir el panel)
+tools/revisar_jefaturas.py Revisa la columna AA y avisa de jefaturas mal escritas o duplicadas
 data/                      Excel vigentes + ultima_actualizacion.json
 .streamlit/config.toml     Tema base y configuración del servidor
 .streamlit/secrets.toml    🔒 Local (ignorado por git): modo_admin / modo_publico

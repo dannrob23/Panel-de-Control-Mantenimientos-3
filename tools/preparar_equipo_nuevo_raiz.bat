@@ -113,6 +113,7 @@ copy /y "deploy_panel\tools\ingesta_raiz.bat" "ingesta.bat" >nul
 copy /y "deploy_panel\tools\actualizacion_automatica_raiz.bat" "actualizacion_automatica.bat" >nul
 copy /y "deploy_panel\tools\actualizar_panel_raiz.bat" "actualizar_panel.bat" >nul
 copy /y "deploy_panel\tools\verificar_datos_raiz.py" "tools\verificar_datos.py" >nul
+copy /y "deploy_panel\tools\revisar_jefaturas_raiz.py" "tools\revisar_jefaturas.py" >nul
 if not exist "actualizar_panel.bat" (
     echo   [ERROR] No pude copiar los scripts desde deploy_panel\tools\.
     echo   Abre Git Bash o CMD en "%DESTINO%" y ejecuta:

@@ -365,9 +365,16 @@ falta pedir ayuda** para la actualización normal.
 | Si quieres… | Escribe |
 |---|---|
 | Actualizar y publicar (uso normal) | doble clic, sin nada más |
+| Revisar la columna AA —jefaturas— sin publicar | `actualizar_panel.bat revisar` |
 | Solo traer los cambios de GitHub | `actualizar_panel.bat pull` |
 | Regenerar los datos sin publicar (probar) | `actualizar_panel.bat local` |
 | Ver la ayuda | `actualizar_panel.bat ayuda` |
+
+> 🔎 **Antes de publicar, el `.bat` revisa la columna AA** (las sedes-jefatura, `NNNNN-NOMBRE`):
+> te dice cuántas hay y te avisa si una sede viene escrita de dos formas distintas (por ejemplo
+> `BQUILLA` y `BAQUILLA`, que son Barranquilla), si algún nombre no es una sede conocida o si la
+> columna no trae jefaturas. Los avisos **no** frenan la publicación: salen en pantalla, pulsas
+> Enter y sigue. Si quieres mirarlos con calma sin publicar nada, usa `actualizar_panel.bat revisar`.
 
 **¿Y si estás en otro computador?** Ese equipo hay que prepararlo **una sola vez**: descarga
 `preparar_equipo_nuevo_raiz.bat` desde el repositorio (carpeta `tools/`), haz doble clic y sigue las

@@ -142,6 +142,16 @@ COLUMNAS_CONSERVAR = {
                   "FECHA", "UPS"],
 }
 
+# Nombre de oficina que se COMPLETA cuando la columna «Oficina» (AB) viene vacia.
+#   El SBAN 09000 agrupa varias sedes: AFINSA · AVIANCA · COA TOCANCIPA ·
+#   DIRECCION GENERAL · SUDAMERIS · TORRES BLANCA. Las filas de ese codigo que NO traen
+#   nombre en la columna AB son de DIRECCION GENERAL, asi que se completan aqui para que
+#   el panel no las muestre como «09000 · nan» ni las deje fuera del ranking por sede.
+#   Se aplica SOLO si la celda esta vacia: nunca sobreescribe un nombre ya escrito.
+NOMBRE_OFICINA_SI_VACIA = {
+    "09000": "DIRECCION GENERAL",
+}
+
 # Ajustes por COLUMNA: quitar espacios, unificar mayusculas, convertir a fecha/numero,
 # reemplazar textos escritos de varias formas, etc.
 #   tipo: "texto" (quita espacios) · "fecha" · "numero" · "mayus" · "titulo"
@@ -414,12 +424,47 @@ def arreglar_encabezados(df: pd.DataFrame, tipo: str, hoja: str) -> pd.DataFrame
     return df
 
 
+def _clave_sban(valor) -> str:
+    """SBAN comparable: sin decimales y con 5 digitos ('9000' -> '09000')."""
+    v = str(valor).strip()
+    if v.endswith(".0"):
+        v = v[:-2]
+    return v.zfill(5) if v.isdigit() else v
+
+
+def rellenar_oficina_vacia(df: pd.DataFrame, tipo: str, hoja: str) -> pd.DataFrame:
+    """Completa la columna «Oficina» cuando viene vacia y el SBAN la identifica.
+
+    Regla del negocio (ver NOMBRE_OFICINA_SI_VACIA): las filas del SBAN 09000 sin nombre en
+    la columna AB son de DIRECCION GENERAL. Solo rellena celdas VACIAS: un nombre ya escrito
+    no se toca nunca.
+    """
+    if not NOMBRE_OFICINA_SI_VACIA:
+        return df
+    c_sban = buscar_columna(df, "SBAN")
+    c_ofi = buscar_columna(df, "Oficina")
+    if c_sban is None or c_ofi is None:
+        return df
+    vacia = (df[c_ofi].isna()
+             | df[c_ofi].astype(str).str.strip().str.lower().isin(["", "nan", "none"]))
+    if not vacia.any():
+        return df
+    relleno = df[c_sban].apply(_clave_sban).map(NOMBRE_OFICINA_SI_VACIA)
+    objetivo = vacia & relleno.notna()
+    if objetivo.any():
+        df.loc[objetivo, c_ofi] = relleno[objetivo]
+        print(f"    · {hoja}: {int(objetivo.sum())} fila(s) sin «Oficina» completadas como "
+              f"{', '.join(sorted(set(relleno[objetivo])))} (segun el SBAN)")
+    return df
+
+
 def preparar_hoja(path: Path, tipo: str, hoja: str) -> pd.DataFrame:
     """Lee una hoja y le aplica todo el flujo de ajuste."""
     df = pd.read_excel(path, sheet_name=hoja)
     print(f"    · {hoja}: {len(df):,} filas x {len(df.columns)} columnas".replace(",", "."))
     df = arreglar_encabezados(df, tipo, hoja)
     df = aplicar_ajustes(df, ajustes_de(tipo, hoja), f"{tipo}/{hoja}")
+    df = rellenar_oficina_vacia(df, tipo, hoja)
     df = conservar_columnas(df, tipo, hoja)
     df = quitar_personales(df, tipo, hoja)
     df = anonimizar(df, tipo)

@@ -156,6 +156,7 @@ Al inicio de `ingesta.py` está la sección **`1) CONFIGURACION`**:
 | `ANONIMIZAR` | `True`: seriales → `H_xxx` y placas → `****1234` antes de publicar |
 | `COLUMNAS_CONSERVAR` | Qué columnas se publican (lo demás se descarta: web más liviana) |
 | `COLUMNAS_PERSONALES` | Datos que **nunca** se publican (nombres, cédulas, correos) |
+| `NOMBRE_OFICINA_SI_VACIA` | Completa la oficina cuando la celda viene vacía (`{"09000": "DIRECCION GENERAL"}`) |
 | `ANALISIS_COLUMNAS` | Ajuste por columna: `texto`, `fecha`, `numero`, `mayus`, `titulo` y `reemplazar` |
 | `COLUMNAS_OBLIGATORIAS` | Si falta alguna, el script **detiene la publicación** para no romper el panel |
 | `SHEETS_POR_TIPO` | Qué hojas se conservan de cada Excel |
@@ -307,6 +308,11 @@ raíz del proyecto antes de publicar, para que la nube reciba exactamente la ver
   reportado es su suma, y ese total es el que usa la columna `Avance %`).
 - **Verificación sin abrir el panel:** `python tools\verificar_datos.py` imprime los totales de control
   (sedes, finalizadas, UPS finalizadas) y el consolidado por jefatura, y avisa si algo no cuadra.
+- **Nombre de oficina vacío en el SBAN 09000 → `DIRECCION GENERAL`.** El código `09000` agrupa varias
+  sedes (AFINSA · AVIANCA · COA TOCANCIPA · DIRECCION GENERAL · SUDAMERIS · TORRES BLANCA). Las filas
+  de ese código que llegan **sin** nombre en la columna AB se completan en la ingesta con la constante
+  `NOMBRE_OFICINA_SI_VACIA`, para que no aparezcan como «09000 · nan» en el ranking de pendientes.
+  Solo rellena celdas **vacías**: nunca sobreescribe un nombre ya escrito, y el Excel de origen no se toca.
 - Al cambiar de módulo se reinician los filtros que podrían dejar la vista vacía.
 
 ---
